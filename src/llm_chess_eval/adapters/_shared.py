@@ -129,9 +129,16 @@ def build_user_message(
             "This list is informational. Use it to verify your candidates are legal."
         )
     if prior_failed:
+        # Cap to last 3 attempts. Longer history bloats the prompt, which
+        # causes reasoning models to spend more tokens reasoning about it,
+        # which on retry-heavy moves can exhaust the response token budget.
+        # 3 is enough to communicate "you've tried these and they're wrong"
+        # without ballooning context as retries accumulate.
+        capped = prior_failed[-3:]
+        ellipsis = f" (and {len(prior_failed) - 3} earlier)" if len(prior_failed) > 3 else ""
         text += (
             "\n\nIMPORTANT: in earlier attempts at THIS SAME position you proposed "
-            f"these moves which were ILLEGAL: {prior_failed}. "
+            f"these moves which were ILLEGAL: {capped}{ellipsis}. "
             "Do NOT propose any of them again. Re-examine the board carefully — "
             "in particular check which of your own pieces are still on the board, "
             "and which squares the opponent attacks. Submit a different, legal move."

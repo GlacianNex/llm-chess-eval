@@ -45,7 +45,7 @@ class OpenAICompatibleAdapter:
         model: str,
         base_url: str,
         api_key_env_var: str,
-        max_tokens: int = 16000,  # generous to fit reasoning + tool output on reasoning-tier models
+        max_tokens: int = 65536,  # generous ceiling for reasoning-tier models (DeepSeek-reasoner, etc.)
         augment_legal_moves: bool = False,
         provider_label: str | None = None,
     ) -> None:
@@ -73,6 +73,7 @@ class OpenAICompatibleAdapter:
         fen: str,
         prior_failed: list[str] | None = None,
         augment_legal_moves: bool | None = None,
+        reasoning_effort_override: str | None = None,
     ) -> CallOutcome:
         use_aug = self.augment_legal_moves if augment_legal_moves is None else augment_legal_moves
         user_text = build_user_message(fen, prior_failed=prior_failed, augment_legal_moves=use_aug)
@@ -82,7 +83,7 @@ class OpenAICompatibleAdapter:
         in_tok = out_tok = 0
 
         def _do_call(tool_choice):
-            return self._client.chat.completions.create(
+            kwargs = dict(
                 model=self.model,
                 max_completion_tokens=self.max_tokens,
                 messages=[
@@ -92,6 +93,9 @@ class OpenAICompatibleAdapter:
                 tools=[SUBMIT_MOVE_TOOL],
                 tool_choice=tool_choice,
             )
+            if reasoning_effort_override is not None:
+                kwargs["reasoning_effort"] = reasoning_effort_override
+            return self._client.chat.completions.create(**kwargs)
 
         with Timer() as t:
             try:

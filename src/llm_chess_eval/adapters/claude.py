@@ -38,6 +38,7 @@ class ClaudeAdapter:
         fen: str,
         prior_failed: list[str] | None = None,
         augment_legal_moves: bool | None = None,
+        reasoning_effort_override: str | None = None,  # accepted for protocol parity; Anthropic separates thinking via thinking.budget_tokens
     ) -> CallOutcome:
         use_aug = self.augment_legal_moves if augment_legal_moves is None else augment_legal_moves
         user_text = build_user_message(fen, prior_failed=prior_failed, augment_legal_moves=use_aug)

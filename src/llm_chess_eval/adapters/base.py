@@ -17,4 +17,5 @@ class ModelAdapter(Protocol):
         fen: str,
         prior_failed: list[str] | None = None,
         augment_legal_moves: bool | None = None,
+        reasoning_effort_override: str | None = None,
     ) -> CallOutcome: ...

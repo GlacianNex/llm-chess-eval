@@ -45,11 +45,13 @@ class OpenAIAdapter:
     def __init__(
         self,
         model: str,
-        # 16000 is generous enough to accommodate full reasoning + tool output for
-        # GPT-5 on any chess position. OpenAI's reasoning models consume max_completion_tokens
-        # for both internal reasoning AND visible output, so this must be larger than
-        # a non-reasoning model's default to avoid empty responses from token exhaustion.
-        max_tokens: int = 16000,
+        # 65536 chosen empirically: GPT-5 at medium reasoning hits `finish_reason="length"`
+        # at 16000 on harder chess positions with retry context. Reasoning chains
+        # for an LLM stuck on a position can balloon to 30k+ tokens. 65536 gives
+        # generous headroom and is well within GPT-5's 128k output limit. Calls
+        # that don't need much reasoning consume fewer tokens regardless; this is
+        # a ceiling, not a target.
+        max_tokens: int = 65536,
         augment_legal_moves: bool = False,
         reasoning_effort: str | None = None,
     ) -> None:
@@ -75,7 +77,14 @@ class OpenAIAdapter:
         fen: str,
         prior_failed: list[str] | None = None,
         augment_legal_moves: bool | None = None,
+        reasoning_effort_override: str | None = None,
     ) -> CallOutcome:
+        """Make a single API call.
+
+        reasoning_effort_override: if set (e.g. "medium", "low", "minimal"),
+        overrides the adapter-level default for THIS call only. Used by play_game
+        to step reasoning effort down after a `finish_reason='length'` failure.
+        """
         use_aug = self.augment_legal_moves if augment_legal_moves is None else augment_legal_moves
         user_text = build_user_message(fen, prior_failed=prior_failed, augment_legal_moves=use_aug)
 
@@ -95,8 +104,10 @@ class OpenAIAdapter:
                     tools=[SUBMIT_MOVE_TOOL],
                     tool_choice={"type": "function", "function": {"name": "submit_move"}},
                 )
-                if self.reasoning_effort is not None:
-                    kwargs["reasoning_effort"] = self.reasoning_effort
+                # Per-call override takes precedence over adapter default.
+                effort = reasoning_effort_override if reasoning_effort_override is not None else self.reasoning_effort
+                if effort is not None:
+                    kwargs["reasoning_effort"] = effort
                 resp = self._client.chat.completions.create(**kwargs)
                 usage = resp.usage
                 if usage is not None:

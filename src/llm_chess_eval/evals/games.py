@@ -91,6 +91,20 @@ GameMode = Literal["forfeit", "substitute", "retry"]
 MATE_CLAMP = 100000
 CP_LOSS_CAP = 1000
 
+# Gradual reasoning-effort stepdown. When an attempt fails with
+# `finish_reason='length'`, the next retry uses a lower reasoning effort
+# to give the model a tighter budget to commit. The ladder is gradual:
+# default → medium → low → minimal. The model still gets to think; the
+# step just shrinks how much.
+_REASONING_STEPDOWN_LADDER = [None, "medium", "low", "minimal"]
+
+
+def _stepdown_for(length_failures: int) -> str | None:
+    """Return the reasoning_effort override given how many length-failures
+    we've already seen for this move. None = use provider default (full)."""
+    idx = min(length_failures, len(_REASONING_STEPDOWN_LADDER) - 1)
+    return _REASONING_STEPDOWN_LADDER[idx]
+
 
 def _quality_cp(cp_loss: int) -> float:
     loss = max(0, cp_loss)
@@ -125,9 +139,18 @@ def _try_parse(board: chess.Board, san: str | None) -> chess.Move | None:
         return None
 
 
-def _attempt_move(adapter: ModelAdapter, board: chess.Board, prior_failed: list[str]) -> tuple[dict | None, chess.Move | None, str | None, float, float, int, str | None, dict | None]:
+def _attempt_move(
+    adapter: ModelAdapter,
+    board: chess.Board,
+    prior_failed: list[str],
+    reasoning_effort_override: str | None = None,
+) -> tuple[dict | None, chess.Move | None, str | None, float, float, int, str | None, dict | None]:
     """One LLM call. Returns (raw_input, parsed_move_or_None, chosen_san_or_None, candidates_legal_rate, chosen_candidate_claim_consistency, latency_ms, error, chosen_cand_dict)."""
-    outcome = adapter.propose_move(board.fen(), prior_failed=prior_failed or None)
+    outcome = adapter.propose_move(
+        board.fen(),
+        prior_failed=prior_failed or None,
+        reasoning_effort_override=reasoning_effort_override,
+    )
     resp = outcome.response
     raw = outcome.raw_tool_input
     if resp is None:
@@ -196,17 +219,22 @@ def play_game(
                 last_claim_consistency = 0.0
                 last_chosen_san: str | None = None
                 chosen_move: chess.Move | None = None
+                # Track reasoning-budget exhaustion to gradually step reasoning down.
+                # See _stepdown_for() below.
+                length_failures = 0
 
                 # Single attempt for forfeit/substitute; multiple for retry.
                 max_attempts = (max_retries + 1) if mode == "retry" else 1
                 ply_start_ts = time.perf_counter()
                 for attempt_idx in range(max_attempts):
+                    effort_override = _stepdown_for(length_failures)
                     _log_progress(
                         progress_path, game_id, adapter.model, ply_count,
                         attempt_idx + 1, max_attempts,
                         time.perf_counter() - ply_start_ts,
                         "call_start",
-                        f"prior_failed={failed_attempts}" if failed_attempts else "",
+                        (f"prior_failed={failed_attempts}" if failed_attempts else "")
+                        + (f" reasoning_effort={effort_override}" if effort_override else ""),
                     )
                     (
                         raw,
@@ -217,7 +245,14 @@ def play_game(
                         latency_ms,
                         err,
                         _chosen_cand,
-                    ) = _attempt_move(adapter, board, failed_attempts)
+                    ) = _attempt_move(adapter, board, failed_attempts, reasoning_effort_override=effort_override)
+                    # If this attempt failed due to reasoning-budget exhaustion,
+                    # step reasoning effort down on the next retry. Gradual:
+                    # default → medium → low → minimal. We do NOT skip straight
+                    # to minimal — give the model a chance to keep reasoning at
+                    # progressively bounded levels.
+                    if err and "finish_reason='length'" in err:
+                        length_failures += 1
                     total_latency += latency_ms
                     _log_progress(
                         progress_path, game_id, adapter.model, ply_count,

@@ -75,10 +75,12 @@ class GeminiAdapter:
     def __init__(
         self,
         model: str,
-        # Gemini reasoning-tier models (e.g. gemini-3.1-pro-preview) consume their
-        # output-token budget on thinking. 16000 leaves generous headroom for full
-        # reasoning + tool emission without artificially capping the model.
-        max_tokens: int = 16000,
+        # 65536: Gemini Pro reasoning chains can balloon past 16000 on hard chess
+        # positions with retry context. Same fix as the OpenAI adapter for the
+        # same root cause (finish_reason hitting length cap, model fails to emit
+        # tool call). 65536 leaves generous headroom; calls finish at less when
+        # the reasoning is bounded.
+        max_tokens: int = 65536,
         augment_legal_moves: bool = False,
     ) -> None:
         try:
@@ -100,6 +102,7 @@ class GeminiAdapter:
         fen: str,
         prior_failed: list[str] | None = None,
         augment_legal_moves: bool | None = None,
+        reasoning_effort_override: str | None = None,  # accepted for protocol parity; Gemini uses thinking_config.thinking_budget instead — not currently wired
     ) -> CallOutcome:
         use_aug = self.augment_legal_moves if augment_legal_moves is None else augment_legal_moves
         user_text = build_user_message(fen, prior_failed=prior_failed, augment_legal_moves=use_aug)
