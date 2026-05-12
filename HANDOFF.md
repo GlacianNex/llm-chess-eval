@@ -55,16 +55,41 @@ The same dynamics that make the video go viral are exactly what this benchmark m
 
 ---
 
+## Contents
+
+1. [The thesis: memorization cliff in 2D-state reasoning](#1-the-thesis-memorization-cliff-in-2d-state-reasoning)
+2. [Glossary](#2-glossary)
+3. [The four evals](#3-the-four-evals)
+4. [The composite metrics (CR + PS)](#4-the-composite-metrics)
+5. [Failure modes observed (qualitative + quantitative)](#5-failure-modes-observed-qualitative--quantitative)
+6. [Why we made each design choice](#6-why-we-made-each-design-choice)
+7. [The benchmark matrix](#7-the-benchmark-matrix)
+8. [End-to-end calculation walkthrough](#8-end-to-end-calculation-walkthrough)
+9. [Multi-provider support](#9-multi-provider-support)
+10. [Cross-family results](#10-cross-family-results)
+11. [Open questions for v3](#11-open-questions-for-v3)
+12. [Quickstart](#12-quickstart)
+13. [The bottom line](#13-the-bottom-line)
+
+For a writeup or external audience, the most useful sections are: §1 (the thesis), §5 (failure modes — concrete and visual), §10 (the matrix and findings), and the [Gotham Moments video](https://www.youtube.com/shorts/YlMWZNx93G4) referenced in the intro.
+
+---
+
 ## TL;DR
 
-Frontier models cruise through **5-7 opening moves perfectly** because chess openings are massively over-represented in their training data. The moment positions go off-script — unique mid-game configurations that don't pattern-match anything in memory — both models fall off a cliff: ~30% of their proposed moves become illegal, ACPL roughly doubles from opening to middlegame, and they commit to the same wrong move five turns in a row because their pattern-match keeps converging on the same out-of-distribution fallback.
+Frontier models cruise through **5-7 opening moves perfectly** because chess openings are massively over-represented in their training data. The moment positions go off-script — unique mid-game configurations that don't pattern-match anything in memory — they fall off a cliff: ~30% of their proposed moves become illegal, ACPL doubles from opening to middlegame, and the model commits to the same wrong move five turns in a row because each turn is stateless and the same pattern-match keeps regenerating the same wrong belief.
 
-Quantitatively (Claude Opus 4.7 / Sonnet 4.6 in v1):
-- **ChessReliability (rule-following)**: 0.173 / 0.150 out of 1.0
-- **PlayStrength (move quality across honest playthroughs at Stockfish skill 5)**: 0.388 / 0.144
-- **ACPL by phase (Opus)**: opening 65 → middlegame 103 → endgame 122 cp
+Quantitatively (v2 clean cells, retry+penalty CR formula, max_retries=10, penalty `0.5^n`):
 
-Models describe chess rules at **99% accuracy** while applying them spatially at **~15% reliability** once they leave familiar opening theory. **The benchmark isolates a specific cognitive failure: LLMs cannot reliably perform spatial/logical reasoning on out-of-distribution states**, even when they can verbalize all the relevant rules.
+| Model | CR | PS | ACPL open / mid / end |
+|---|---|---|---|
+| `claude-opus-4-7` | 0.427 | 0.259 | 84 / 241 / – |
+| `claude-haiku-4-5-20251001` | 0.210 | 0.094 | 62 / – / – |
+| `gemini-3.1-flash-lite` | **0.633** | **0.726** | 43 / 71 / 66 |
+
+(OpenAI, Gemini Pro Preview, and DeepSeek re-running with token-bug fix at time of writing — see §6.1 for the methodology lesson and §10 for the contaminated buggy numbers we discarded.)
+
+The headline gap is between **what the model can describe** (consistency eval: 99% accuracy on rule-claims about moves) and **what the model can do** (CR 0.21–0.63, depending on model; the best frontier-tier model peaks below 0.5). **The benchmark isolates a specific cognitive failure: LLMs cannot reliably perform spatial/logical reasoning on out-of-distribution states**, even when they can verbalize all the relevant rules.
 
 ---
 
@@ -101,8 +126,8 @@ Concise reference. Each term used in this doc, in one or two sentences.
 - **Centipawn (cp)** — 1/100 of a pawn of advantage. Standard chess-engine unit for position evaluation. 100 cp = 1 pawn; 300 cp ≈ a minor piece; 900 cp ≈ a queen; ±10000 cp = clamped mate score.
 - **cp_loss** — For a given LLM move, the centipawn difference between what Stockfish would have played and what the model actually played. Always ≥ 0; 0 if the model played Stockfish's #1.
 - **ACPL** — Average Centipawn Loss. Mean of cp_loss across moves. Standard chess-strength metric. Lower is better. Strong club player ~50 cp ACPL; engine ~10 cp; casual ~150 cp.
-- **CR (ChessReliability)** — Composite metric for rule-following ability. See §5.
-- **PS (PlayStrength)** — Composite metric for sustained move quality across an honest playthrough. See §5.
+- **CR (ChessReliability)** — Composite metric for rule-following ability. See §4.
+- **PS (PlayStrength)** — Composite metric for sustained move quality across an honest playthrough. See §4.
 - **Forfeit mode** — Game eval mode: the game ends when the model proposes its first illegal move.
 - **Substitute mode** — Game eval mode: when the model proposes an illegal move, Stockfish's best move is played in its place and the game continues. Used to measure cascade.
 - **Retry mode** — Game eval mode: when the model proposes an illegal move, it is told and asked to try again, up to `max_retries` times. If all retries fail, the game forfeits.
@@ -155,7 +180,36 @@ Three modes:
 Stockfish skill defaults: 3 for CR (forfeit), 5 for PS (retry).
 
 ### 3.4 Composite metrics: CR and PS
-See §5 for full definitions and rationale.
+See §4 for full definitions and rationale.
+
+### 3.5 Structured output the model produces (every eval)
+
+Every eval forces the model into the same JSON tool-call schema. Pydantic types live in [`types.py`](src/llm_chess_eval/types.py); the shared schema constant is `SUBMIT_MOVE_PARAMETERS` in [`adapters/_shared.py`](src/llm_chess_eval/adapters/_shared.py).
+
+```jsonc
+{
+  "position_summary": "string — 1-2 sentence summary of the position",
+  "candidates": [
+    {
+      "san": "string — candidate move in SAN, e.g. Nf3 or O-O or e8=Q+",
+      "rationale": "string — why this move is being considered",
+      "claims": {
+        "is_check": bool,             // gives check (and is NOT mate)
+        "is_capture": bool,           // captures a piece (incl. en passant)
+        "captured_piece": "P|N|B|R|Q or null",
+        "is_castle": bool,
+        "is_promotion": bool,
+        "is_en_passant": bool,
+        "gives_mate": bool            // delivers checkmate
+      }
+    }
+    // ... 2-4 candidates
+  ],
+  "chosen_move": "string — must equal one of candidates[].san"
+}
+```
+
+Each provider's adapter wraps this in its native tool-call format (Anthropic `tools=[{...}]`, OpenAI `tools=[{type:"function",...}]`, Gemini `FunctionDeclaration`, etc.). Forced tool-use is essential because it gives us a deterministic parser and a structured grading surface.
 
 ---
 
@@ -254,7 +308,104 @@ In v1, Opus PS / CR = 0.388 / 0.173 (2.2× lift); Sonnet PS / CR = 0.144 / 0.150
 
 ---
 
-## 5. Why we made each design choice
+## 5. Failure modes observed (qualitative + quantitative)
+
+The composite scores are a summary; the failures themselves are where the eval becomes interesting. Across the v1 runs (224 illegal moves total across all model-position cells on Anthropic Opus and Sonnet), we classified every illegal move into a category. The classifier lives in [`analytics/illegal_taxonomy.py`](src/llm_chess_eval/analytics/illegal_taxonomy.py).
+
+### 5.1 Illegal-move taxonomy (n = 224, Claude v1 data)
+
+| Category | % | Spatial computation that failed |
+|---|---|---|
+| `leaves_in_check` | 27% | Line-of-sight from enemy piece to own king (long diagonal / rank / file). Moves a pinned piece, or in-check and doesn't address it. |
+| `path_blocked` | 23% | Square-by-square enumeration of an intermediate path. Slides a queen/rook/bishop through other pieces. |
+| `king_into_check` | 15% | Attack-set calculation: which squares are attacked by the opponent. Walks the king into an attacked square. |
+| `phantom_source` | 12% | Per-piece position tracking across state changes. Piece type exists somewhere — but not where the model thinks. |
+| `wrong_pawn_move` | 10% | Direction + distance reasoning for piece type. Pawn impossibilities (capture into empty, wrong distance). |
+| `king_adjacent` | 5% | Adjacency relation on a 2D grid. Two kings would be adjacent. |
+| `target_blocked` | 3% | Inventory + placement reasoning. Lands on own piece. |
+| `no_source_piece` | 3% | Inventory reasoning. Piece type doesn't exist for our side at all. |
+| `castle_invalid` | 1% | Multi-square, history-dependent state. Castle rights gone or king in check. |
+
+**~95% of failure mass is spatial reasoning** (line-of-sight, path enumeration, attack sets, position tracking, adjacency). The remaining ~5% is inventory / castling state. **Both Claude models showed the same distribution** — failure modes are not model-specific within a family.
+
+### 5.2 The "persistent wrong belief" pattern
+
+The most striking single qualitative finding. Models don't just produce random illegal moves; they form coherent-but-wrong mental models of the position and commit to them across consecutive moves. Each API call is stateless from the model's side — but the same wrong geometry regenerates on each turn because the same input prompts the same pattern-match collapse.
+
+Three documented examples from substitute-mode games (where Stockfish-best replaces illegal moves so the game continues, exposing the model to repeated decision points):
+
+**Opus substitute game 1 — `Kxg4` proposed 5 times in 11 plies:**
+> ply 25: rationale "grabs the pawn on g4" (illegal: king_into_check)
+> ply 32: "captures the g4 pawn for free"
+> ply 33: "wins the g4 pawn"
+> ply 35: "to grab material"
+> ply 36: "capture the g4 pawn to remove threat"
+
+White's king cannot capture the g4 pawn because doing so puts it in check (the king would be attacked after the capture by a piece behind g4 in the model's blind spot). Opus regenerates this same wrong move 5 times even though Stockfish-substituted around it on every preceding attempt — the model has no memory of its prior failure on this position.
+
+**Sonnet substitute game 1 — `Kxc3` proposed 5 times:** same pattern, same failure category.
+
+**Sonnet substitute game 1 — `d7` proposed 3 times across plies 20, 22, 23:**
+> "Advancing the passed pawn to d7 attacks the black rook..."
+> "Advancing d6 pawn to d7 puts tremendous pressure..."
+> "Advancing the d6 pawn to d7 puts tremendous pressure..."
+
+There is no white pawn that can advance to d7 in this position. The model believes in a pawn configuration that doesn't exist. The wrong belief survives across stateless API calls because the same FEN input deterministically prompts the same wrong analysis.
+
+**This is qualitatively different from standard LLM hallucinations.** A typical hallucination is a one-shot plausible-sounding wrong fact. The pattern here is *convergence on the same specific wrong belief across many independent invocations* — implying the belief is encoded in the model's response to a specific input rather than being a random error.
+
+### 5.3 Retry-iteration analysis — when does feedback help?
+
+In retry mode, when the model's first proposal is illegal, we tell it "your move X was illegal, try again" and include the list of prior failed attempts. This tests whether the model can update its mental model when given explicit feedback.
+
+**Across 22 Opus retry attempts in one gauntlet game:**
+- 17 / 22 retries iterated to a *different piece type* (model genuinely updated)
+- 3 / 22 same piece type, different target
+- 2 / 22 same exact SAN repeated despite being told it was illegal
+
+**The forfeits cluster on plies where ALL 4 attempts share the same structural mistake.** Example: at one ply Black was in check from a distant bishop. Opus proposed 4 moves over its retry budget — none addressed the check, because Opus didn't perceive the check at all. Every retry proposed a "good move" that ignored the check, because the model's mental model was missing the bishop's attack on the king.
+
+**Conclusion: feedback fixes "wrong move from a roughly-correct mental model" but cannot fix "wrong mental model of what's on the board."** The model can change its move but it cannot, via text feedback alone, change what it thinks it's looking at.
+
+### 5.4 Hardest positions in the v1 bank
+
+Aggregated across all v1 (Claude) legality + consistency runs (n=6 runs per position):
+
+| Position | Chose illegal % | Cand illegal % | Claim imperfect % | What stresses the model |
+|---|---|---|---|---|
+| `endgame_zugzwang` | 67% | 63% | 60% | Black pawn on g7 attacks f6/h6; only Kf5/g5/h5 legal. Models keep trying Kxg7 (adjacent to enemy king) and Kf6/Kh6 (walk into pawn attacks). |
+| `opposite_bishops` | 67% | 61% | 20% | Black bishop on f1 checks white king on d3 from distance. Models routinely don't perceive the long-diagonal check. |
+| `kp_vs_k_lucena` | 33% | 26% | 40% | White K on b8, P on b7. Promotion b8=Q is blocked by own king. Models propose it anyway. |
+| `black_to_move_middle` | 33% | 21% | 40% | Complex middlegame; models hallucinate phantom pawn moves (d5, cxd4 when no c-pawn). |
+| `kq_vs_k` | 0% | 0% | 80% | Models pick legal moves but their rule-claims (is_check? gives_mate?) are wrong 80% of the time — they don't reliably notice when a queen move is mate. |
+| Opening positions (italian / ruy_lopez / kings_indian / start / after_e4) | **0%** | 0-4% | 0-14% | Memorized opening theory. Both models essentially perfect here. |
+
+**Failure clusters by position type:**
+1. **Distant-attacker check detection** — when an enemy piece attacks the king from a non-adjacent square via a long diagonal or rank, both models routinely miss the check entirely.
+2. **Own-piece coexistence with target square** — models propose moves that would land on their own pieces (e.g., promotion onto a square already occupied by own king).
+3. **Phantom pawns in middlegames** — models hallucinate pawn structures that don't exist in the current FEN.
+4. **Mate/check claim accuracy in simple endgames** — the move is fine but the model can't tell you whether the move is mate.
+
+**Opening positions show 0% failure rate across every model tested.** This is the cleanest test of "is the model reasoning or recalling?" we have. The fail rate gap between memorized positions and synthetic positions is the headline evidence for the memorization-cliff thesis.
+
+### 5.5 Cross-eval correlation — what each eval uncovers
+
+The four evals are partly independent. Across (model × position) cells in v1:
+
+| Outcome | Count |
+|---|---|
+| Both legality and consistency fail | 6 |
+| Only legality fails | 4 |
+| **Only consistency fails** | **19** |
+| Both pass | 11 |
+
+**Consistency-only failures are the largest bucket.** The model picks a legal move, but its rule-claims about that move (is it check? gives mate? what does it capture?) are wrong. This is a finer-grained perception failure than legality — even when the model correctly identifies a valid move, it can't always tell you what that move *does*. Legality and consistency expose different facets of the same underlying weakness.
+
+The intersection (both fail on the same position) is small (6 cells) — the two evals are not measuring the same thing twice. That's by design: legality measures *can you produce one valid move*, consistency measures *do your claims about every move you considered match reality*.
+
+---
+
+## 6. Why we made each design choice
 
 Explicit justifications for the non-obvious decisions.
 
@@ -295,9 +446,42 @@ The original CR used forfeit mode (game ends on first illegal move). It worked w
 **Why a 2D matrix of providers × tiers (frontier / budget)?**
 Single-model evals can't separate "this provider is weak at chess" from "this specific tier is weak." The within-provider frontier-vs-budget gap is its own signal: a budget tier may collapse disproportionately on spatial reasoning compared to its general-reasoning benchmark scores.
 
+### 6.1 Methodology lessons learned (token-exhaustion bug)
+
+During v2 cross-family runs, GPT-5 and Gemini 3.1 Pro Preview produced suspiciously low scores. Investigation revealed the cause: **reasoning models exhaust their `max_completion_tokens` budget on internal reasoning before they can emit the tool call**. The error pattern was distinctive:
+
+```
+error: "Model did not call submit_move (finish_reason='length', content_preview='')"
+```
+
+The model wasn't producing illegal moves — it was producing *no output at all* because reasoning consumed the entire token budget. Our adapter recorded these as illegal-move forfeits.
+
+**Provider-specific behavior:**
+- **Anthropic SDK**: `max_tokens` means *output* tokens only. Thinking tokens are separate and billed independently. → not affected.
+- **OpenAI SDK**: `max_completion_tokens` counts reasoning *and* output. At 2048 default, GPT-5 reasoning alone exhausts the budget. → severely affected.
+- **Google `google-genai`**: `max_output_tokens` similarly includes thinking. Gemini 3.1 Pro Preview affected. Gemini Flash Lite (non-reasoning) unaffected.
+- **DeepSeek**: OpenAI-compatible. DeepSeek-reasoner *might* have been affected but the data showed zero errors of this type — DeepSeek's reasoning may not consume tokens this way, or the API may handle it differently.
+
+**Fix applied** (commit history visible in repo):
+1. Bumped default `max_tokens` from 2048 to **16000** in `openai.py`, `gemini.py`, and `openai_compat.py`. Anthropic adapter unchanged (its semantics don't have this problem).
+2. Added diagnostic capture: when the model doesn't emit a tool call, we now log `finish_reason` and a content snippet so future failures are diagnosable without forensic analysis.
+3. **Resisted the temptation to set `reasoning_effort='low'`** as a workaround — that would have measured a handicapped version of the model rather than the model itself. The fix gives the model enough budget to use full reasoning at its default effort.
+
+**Diagnostic that surfaced the bug:** grep across `runs/*/games.jsonl` for the literal string `"did not call submit_move"`:
+
+| Provider | Error count | Affected? |
+|---|---|---|
+| Claude (Opus + Haiku) | 0 | clean |
+| GPT-5 + GPT-5-mini | 26 | affected — re-run required |
+| Gemini 3.1 Pro Preview | 12 | affected — re-run required |
+| Gemini 3.1 Flash Lite | 0 | clean (non-reasoning model) |
+| DeepSeek (both) | 0 | clean |
+
+**The lesson generalizes.** When implementing an LLM benchmark with structured output, the failure-to-emit-tool-call case must be distinguished from the "model produced wrong output" case in your error taxonomy. Otherwise model-API token-budget bugs will be misattributed to model weakness. Capture `finish_reason` and any content the model did emit — that's enough signal to tell the two apart.
+
 ---
 
-## 6. The benchmark matrix
+## 7. The benchmark matrix
 
 Standardized cross-provider set. Each provider contributes a frontier model (strongest) and a budget model (cheapest reasonable tier). Defined in [`config.BENCHMARK_MATRIX`](src/llm_chess_eval/config.py).
 
@@ -320,7 +504,7 @@ llm-chess-eval benchmark --dry-run             # preview the plan, no spend
 
 ---
 
-## 7. End-to-end calculation walkthrough
+## 8. End-to-end calculation walkthrough
 
 A single move, fully traced.
 
@@ -350,7 +534,7 @@ A single move, fully traced.
 
 ---
 
-## 8. Multi-provider support
+## 9. Multi-provider support
 
 The CLI accepts any model ID; routing is done by `provider_for_model()` in [`config.py`](src/llm_chess_eval/config.py).
 
@@ -374,7 +558,7 @@ For OpenAI-API-compatible providers (DeepSeek, Mistral, vLLM, self-hosted), reus
 
 ---
 
-## 9. Cross-family results
+## 10. Cross-family results
 
 ### v1 (Claude only)
 
@@ -387,51 +571,65 @@ For OpenAI-API-compatible providers (DeepSeek, Mistral, vLLM, self-hosted), reus
 
 ### v2 — full matrix (2026-05-12)
 
-CR uses the final retry+penalty formula (`max_retries=10`, penalty `0.5^n`) at Stockfish skill 3; PS uses retry mode at skill 5 with `max_retries=3`. N=5 games for CR, N=3 for PS, alternating colors.
+CR uses the final retry+penalty formula (`max_retries=10`, penalty `0.5^n`) at Stockfish skill 3; PS uses retry mode at skill 5 with `max_retries=3`. N=5 games for CR, N=3 for PS, alternating colors. Stockfish skill 3 ≈ ~1500 ELO opponent; skill 5 ≈ ~1700 ELO.
+
+**⚠️ The first v2 run hit a token-exhaustion bug** (see §6.1) that affected OpenAI and Gemini Pro Preview only. Those numbers below are from a clean re-run with the bug fix applied (max_tokens raised to 16000, no `reasoning_effort` handicap). Anthropic and Gemini Flash Lite were never affected.
 
 | Provider | Tier | Model | CR | PS | ACPL open | ACPL mid | ACPL end |
 |---|---|---|---|---|---|---|---|
 | Anthropic | frontier | `claude-opus-4-7` | **0.427** | 0.259 | 84 | 241 | – |
 | Anthropic | budget | `claude-haiku-4-5-20251001` | 0.210 | 0.094 | 62 | – | – |
-| OpenAI | frontier | `gpt-5` | **0.018** | 0.028 | 5 | – | – |
-| OpenAI | budget | `gpt-5-mini` | 0.085 | 0.065 | 20 | – | – |
-| Google | frontier | `gemini-3.1-pro-preview` | 0.356 | 0.306 | 25 | 55 | – |
+| OpenAI | frontier | `gpt-5` | _re-run pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| OpenAI | budget | `gpt-5-mini` | _re-run pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| Google | frontier | `gemini-3.1-pro-preview` | _re-run pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
 | Google | budget | `gemini-3.1-flash-lite` | **0.633** | **0.726** | 43 | 71 | 66 |
-| DeepSeek | frontier | `deepseek-reasoner` | 0.116* | 0.464 | 74 | 139 | 8 |
-| DeepSeek | budget | `deepseek-chat` | 0.074* | 0.068 | 130 | – | – |
+| DeepSeek | frontier | `deepseek-reasoner` | _re-run pending_ | 0.464 | 74 | 139 | 8 |
+| DeepSeek | budget | `deepseek-chat` | _re-run pending_ | 0.068 | 130 | – | – |
 
-\* DeepSeek CR is from an earlier formula iteration (`max_retries=5`, penalty `0.6^n`). The matrix re-run was killed before DeepSeek finished; these numbers under the final formula would likely shift modestly (more retries available → potentially higher CR if DeepSeek can recover with more attempts). PS unaffected — the PS formula didn't change.
+DeepSeek CR is being re-run for methodology consistency with the final formula (its prior numbers used an earlier `max_retries=5` / penalty `0.6^n` formula). DeepSeek was *not* affected by the token-exhaustion bug — PS values shown are valid.
 
-### Headline findings
+**Buggy-run numbers (DO NOT USE for analysis — kept for diagnostic completeness):**
 
-**1. Gemini 3.1 Flash Lite dominates.** It scores highest on both metrics: CR 0.633 (almost 2× the next-best), PS 0.726, and is the only model to consistently reach the endgame phase in retry-mode PS (ACPL endgame 66 cp — engine-tier quality). The budget Gemini outperforms every frontier model tested.
+The first v2 run produced the following values before we caught the token-exhaustion bug. They are recorded here only for reproduction transparency:
 
-**2. GPT-5 is the worst performer across the matrix.** CR 0.018, PS 0.028 — essentially zero on both. When GPT-5 plays a move it plays well (opening ACPL 5 cp, Stockfish-tier), but it forfeits so quickly with retries that it never establishes a real game. Its reasoning-tier overhead burns through the retry budget on the same wrong moves.
-
-**3. Budget tier beats frontier tier in 2 of 4 providers.**
-
-| Provider | Frontier CR / PS | Budget CR / PS | Reversal? |
+| Model | Buggy CR | Buggy PS | Diagnostic |
 |---|---|---|---|
-| Anthropic | 0.427 / 0.259 | 0.210 / 0.094 | no — frontier wins both |
-| **OpenAI** | **0.018 / 0.028** | **0.085 / 0.065** | **YES — budget 4.7× CR, 2.3× PS** |
-| **Google** | **0.356 / 0.306** | **0.633 / 0.726** | **YES — budget 1.8× CR, 2.4× PS** |
-| DeepSeek | 0.116 / 0.464 | 0.074 / 0.068 | no — frontier wins both |
+| `gpt-5` | 0.018 | 0.028 | Model exhausted reasoning tokens before tool emission; recorded as illegal forfeits |
+| `gpt-5-mini` | 0.085 | 0.065 | Same |
+| `gemini-3.1-pro-preview` | 0.356 | 0.306 | Same on a subset of moves; some valid moves mixed in |
 
-The pattern is striking enough to warrant the hypothesis: **reasoning-tier optimization can hurt 2D-state tracking**. The models that "think more" before committing to a move are more likely to commit to a hallucinated state, then re-derive the same wrong state on the next turn. Budget/distilled models that lean on pattern-completion appear to be more robust to state drift on this task.
+These exhibit the spurious "GPT-5 catastrophically bad" pattern that the bug created. The corrected re-run is in flight at time of this writeup.
 
-This is consistent with the in-flight observation that GPT-5 spent 19 retries on a single early move and still forfeited — repeatedly proposing the same illegal move from the same wrong mental model. A non-reasoning model would have given up that line of thought sooner.
+### Headline findings (clean cells only)
 
-**4. Reasoning models that DID reach mid/endgame are still mediocre.** DeepSeek-reasoner has good PS (0.464) — it ran 31-ply games and reached endgame with ACPL 8 cp (engine-tier when it got there). But low CR (0.116) means it needed many retries to make it. The reasoning helped quality once playing but hurt the rule-following layer.
+The findings below are limited to cells we can stand behind right now: Anthropic (both tiers) and Gemini 3.1 Flash Lite. Other cells are pending re-run.
 
-**5. The memorization-cliff confirms across all tested families.** ACPL opening 5-130 cp; ACPL middlegame 55-241 cp where measured. Every model that played past opening showed a clear quality drop, validating the "memorization cliff" thesis on a non-Claude sample.
+**1. Anthropic frontier > budget on both metrics.** Opus 0.427 / 0.259 vs Haiku 0.210 / 0.094. CR 2× higher for Opus; PS 2.8× higher. Anthropic's adapter was clean of the token bug throughout, so these numbers are final.
+
+**2. Gemini 3.1 Flash Lite is the strongest non-Anthropic model in clean data.** CR 0.633 (highest measured of any model), PS 0.726 (also highest), and the only model to consistently reach the endgame phase in retry-mode PS (ACPL endgame 66 cp — engine-tier when it plays there). This is the *budget* tier — and it outscores Anthropic Opus on both metrics.
+
+**3. The memorization-cliff thesis holds across families.** Every model that played past opening showed the ACPL gradient: opening 25-130 cp → middlegame 55-241 cp → endgame (where reached) 8-66 cp. Opening positions are essentially perfect for every model; quality degrades sharply on out-of-distribution positions. This is the clearest test of "reasoning vs recall" the benchmark provides.
+
+### Working hypotheses pending re-run
+
+These patterns appeared in the bug-contaminated data but cannot be trusted until the re-run lands. Listed as predictions to verify:
+
+- **"Budget tier beats frontier tier in 2 of 4 providers."** Buggy data showed reversals for OpenAI (GPT-5 0.018 < GPT-5-mini 0.085) and Google (Pro 0.356 < Flash Lite 0.633). The Google reversal involves one clean number (Flash Lite 0.633), so it might hold. The OpenAI reversal could disappear entirely once GPT-5 runs with adequate token budget.
+- **"Reasoning-tier optimization hurts 2D-state tracking."** Derived hypothesis. If the OpenAI reversal disappears after re-run, this hypothesis weakens. If the Google reversal survives (Flash Lite > Pro Preview with both numbers clean), it gets one-provider confirmation.
+- **"DeepSeek-reasoner reaches mid/endgame at near-engine quality (ACPL endgame 8 cp) but needs many retries to get there."** Based on PS data which was *not* affected by the bug — DeepSeek showed zero "did not call submit_move" errors. This finding holds.
 
 ### Cross-tier interpretation
 
-The within-provider rankings tell a more interesting story than the absolute scores. If you were choosing a model for an agent task that requires sustained state-tracking (multi-turn tool use, long refactors, long-document analysis), the v2 data suggests **the frontier reasoning-tier model is often NOT the right choice**. Two of four providers (Google and OpenAI) showed the budget tier outperforming on this measurement. The Anthropic Opus and DeepSeek-reasoner exceptions are notable — those frontier models retained dominance, but neither dominated as much as their general-reasoning benchmarks would suggest.
+Until the re-run lands, the firm cross-tier claim is limited to:
+
+- **Anthropic frontier beats Anthropic budget** on both metrics (Opus > Haiku).
+- **Gemini Flash Lite (budget) is the strongest model in the clean data**, beating Anthropic Opus.
+
+Whether the Gemini Flash Lite advantage over Gemini Pro Preview survives a clean-methodology re-run is the central question; that's the test of whether reasoning-tier optimization is *systematically* hurting spatial state-tracking, or whether the apparent effect was a token-budget artifact on the Pro tier.
 
 ---
 
-## 10. Open questions for v3
+## 11. Open questions for v3
 
 1. **Mid-game starting positions** — does the cascade need game-length state accumulation, or does it appear immediately from a complex mid-game FEN? Separates "drift across turns" from "complex positions are harder regardless."
 2. **Reasoning-trace inspection across retries** — save every retry's full response (currently only the final one). Measures whether the model genuinely updates between retries vs. pattern-matching a different SAN.
@@ -441,7 +639,7 @@ The within-provider rankings tell a more interesting story than the absolute sco
 
 ---
 
-## 11. Quickstart
+## 12. Quickstart
 
 ```powershell
 # Setup
@@ -478,6 +676,61 @@ llm-chess-eval games       --model claude-opus-4-7 --mode retry --games 2
 # Aggregate scorecard across every run in runs/
 llm-chess-eval report
 ```
+
+### Cost and runtime (per model, default config)
+
+Per-model cost depends heavily on the provider's pricing and whether the model is a reasoning tier. v2 actuals:
+
+| Model | CR + PS combined cost | CR + PS combined wall time |
+|---|---|---|
+| `claude-opus-4-7` | ~$5 | ~12 min |
+| `claude-haiku-4-5-20251001` | ~$0.30 | ~6 min |
+| `gpt-5` (reasoning, slow) | ~$8-12 | ~60-90 min |
+| `gpt-5-mini` | ~$1-2 | ~20-30 min |
+| `gemini-3.1-pro-preview` (reasoning, slow) | ~$5-8 | ~30-60 min |
+| `gemini-3.1-flash-lite` | ~$0.50 | ~10-15 min |
+| `deepseek-reasoner` | ~$2 | ~30 min |
+| `deepseek-chat` | ~$0.50 | ~10 min |
+
+Full 8-cell matrix: **~$25-40 in API spend, ~2-3 hours wall time** if jobs run sequentially. Parallelize across providers (different API endpoints) to cut total wall time roughly in half.
+
+### How to read the raw output (for reproduction)
+
+Each eval run writes a timestamped directory under `runs/`:
+
+```
+runs/
+  20260512T000000Z__legality__claude-opus-4-7/legality.jsonl
+  20260512T000000Z__consistency__claude-opus-4-7/consistency.jsonl
+  20260512T000000Z__games_forfeit__claude-opus-4-7__skill3/games.jsonl
+  20260512T000000Z__games_retry__gpt-5__skill5/games.jsonl
+```
+
+Each JSONL row is one scored item:
+- **Legality / consistency**: one row per position. Includes the model's full structured response, scores, sub-scores, and ground-truth comparisons.
+- **Games**: one row per game. Contains `moves[]` — every LLM move with `chosen_san`, `chosen_legal`, `retries_used`, `failed_attempts`, `cp_loss`, `claim_consistency`, and the raw model response.
+
+You can re-score any run with the headline metrics without burning more API budget:
+
+```powershell
+# Re-score CR from existing games.jsonl
+llm-chess-eval reliability --games-jsonl path/to/games.jsonl
+
+# Re-score PS from retry-mode games.jsonl
+llm-chess-eval play-strength --games-jsonl path/to/games.jsonl
+
+# Apply the failure taxonomy to all collected illegal moves
+python scripts/classify_all_illegals.py
+```
+
+### Debugging a failing model
+
+If a model produces very low scores, before concluding it's a model weakness, check:
+
+1. Does `llm-chess-eval legality --model X --n 5` succeed? If not, adapter issue, not model.
+2. Grep for `"did not call submit_move"` in the run JSONL. Any hits → token-exhaustion bug; raise `max_tokens` on that adapter.
+3. Look at `finish_reason` in the error message. `"length"` → ran out of tokens. `"content_filter"` → safety refusal. `"stop"` with no tool call → model elected not to call the tool.
+4. Inspect a single failing game move-by-move with `python scripts/quick_inspect.py path/to/games.jsonl`.
 
 ### Repository layout
 
@@ -525,8 +778,10 @@ HANDOFF.md                           # this file
 
 ---
 
-## 12. The bottom line
+## 13. The bottom line
 
-The eval measures whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across multiple reasoning steps. Frontier models score 0.15-0.17 on the headline reliability metric while playing high-quality individual moves at 95-99% accuracy. The gap between move quality (≥95%) and game completion (0%) is the spatial-reasoning ceiling, observable as a single number.
+The eval measures whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across multiple reasoning steps. The clean cells we have so far (Claude Opus, Claude Haiku, Gemini 3.1 Flash Lite) score between **0.21 and 0.63** on ChessReliability while playing high-quality individual moves (ACPL 60-90 cp at opening, engine-tier when the model reaches mid/endgame). The gap between move quality on individual moves and game completion across many moves is the spatial-reasoning ceiling, observable as a single number per model.
 
-Chess gives a domain with deterministic ground truth, calibrated difficulty, and rules whose application is purely geometric. Models can describe these rules verbally with high accuracy while struggling to apply them spatially. The benchmark exposes this gap with a small, cheap, reproducible test — a structural weakness shared by current frontier models on a generalizable cognitive dimension.
+Chess gives a domain with deterministic ground truth, calibrated difficulty (memorized openings vs. unique mid/endgames), and rules whose application is purely geometric. Models can describe these rules verbally with 99% accuracy on the consistency eval while applying them spatially at much lower rates on the legality and game evals. The benchmark exposes this gap with a small, cheap, reproducible test — a structural weakness shared by frontier and budget models alike on a generalizable cognitive dimension.
+
+**The biggest open question for v3 is the within-provider reversal pattern** — does Gemini Flash Lite (budget) genuinely outperform Gemini Pro Preview (frontier) on this task once both run with adequate token budget? The first v2 run suggested yes, but the bug-fix re-run is the actual test. If the pattern holds, "frontier reasoning model is the safer choice for agent work that requires sustained state-tracking" stops being the obvious default.
