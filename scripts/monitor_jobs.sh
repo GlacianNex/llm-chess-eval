@@ -41,10 +41,12 @@ while true; do
             last_ts=${LAST_CHANGE_TS[$key]:-$NOW}
             stall_min=$(( (NOW - last_ts) / 60 ))
             reported=${STALL_REPORTED[$key]:-""}
-            # Adjusted threshold: 60 min. Reasoning models can take 20-40 min per
-            # game legitimately; 60 min without a new row is real evidence the
-            # process is hung (network, API timeout, dead python). Investigate, don't wait longer.
-            if [ "$stall_min" -ge 60 ] && [ -z "$reported" ]; then
+            # Threshold tuned for reasoning models at max_tokens=16000:
+            # Gemini 3.1 Pro Preview and DeepSeek-reasoner can take 5-10+ min per
+            # API call. A single game (10-15 moves × possible retries) can run
+            # 1-2.5 hours. 2-hour threshold catches real hangs without spurious
+            # alerts on legit slow reasoning.
+            if [ "$stall_min" -ge 120 ] && [ -z "$reported" ]; then
                 echo "[$(date +%H:%M:%S)] STALL $key no_progress_for=${stall_min}min rows=$rows"
                 STALL_REPORTED[$key]="yes"
             fi
