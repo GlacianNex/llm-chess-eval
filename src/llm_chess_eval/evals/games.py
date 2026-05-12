@@ -251,7 +251,14 @@ def play_game(
                     # default → medium → low → minimal. We do NOT skip straight
                     # to minimal — give the model a chance to keep reasoning at
                     # progressively bounded levels.
-                    if err and "finish_reason='length'" in err:
+                    #
+                    # Triggers (both are reasoning-budget symptoms):
+                    #   - "finish_reason='length'": OpenAI/Gemini hit max_output_tokens
+                    #     mid-reasoning, no tool call emitted.
+                    #   - "MALFORMED_FUNCTION_CALL": Gemini emits a function call but
+                    #     the args don't parse against the schema — typically from
+                    #     reasoning that runs long enough to corrupt the tool output.
+                    if err and ("finish_reason='length'" in err or "MALFORMED_FUNCTION_CALL" in err):
                         length_failures += 1
                     total_latency += latency_ms
                     _log_progress(

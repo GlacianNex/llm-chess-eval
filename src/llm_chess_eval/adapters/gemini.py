@@ -102,8 +102,16 @@ class GeminiAdapter:
         fen: str,
         prior_failed: list[str] | None = None,
         augment_legal_moves: bool | None = None,
-        reasoning_effort_override: str | None = None,  # accepted for protocol parity; Gemini uses thinking_config.thinking_budget instead — not currently wired
+        reasoning_effort_override: str | None = None,
     ) -> CallOutcome:
+        """reasoning_effort_override maps to Gemini's thinking_config.thinking_budget:
+            'medium'  → 8192 thinking tokens
+            'low'     → 2048 thinking tokens
+            'minimal' → 0 thinking tokens (forces immediate tool call)
+            None      → no thinking_config set (model's default thinking budget)
+        Used by play_game to step thinking down after length / MALFORMED_FUNCTION_CALL
+        failures on the same move, mirroring the OpenAI reasoning_effort stepdown.
+        """
         use_aug = self.augment_legal_moves if augment_legal_moves is None else augment_legal_moves
         user_text = build_user_message(fen, prior_failed=prior_failed, augment_legal_moves=use_aug)
         types = self._types
@@ -121,12 +129,28 @@ class GeminiAdapter:
                 allowed_function_names=["submit_move"],
             )
         )
-        config = types.GenerateContentConfig(
+
+        # Translate the cross-provider effort ladder into Gemini's thinking_budget.
+        thinking_config = None
+        if reasoning_effort_override is not None:
+            budget_map = {"medium": 8192, "low": 2048, "minimal": 0}
+            budget = budget_map.get(reasoning_effort_override)
+            if budget is not None:
+                try:
+                    thinking_config = types.ThinkingConfig(thinking_budget=budget)
+                except Exception:
+                    # Older google-genai versions lack ThinkingConfig; silently skip.
+                    thinking_config = None
+
+        config_kwargs = dict(
             system_instruction=SYSTEM_PROMPT,
             tools=[tool],
             tool_config=tool_config,
             max_output_tokens=self.max_tokens,
         )
+        if thinking_config is not None:
+            config_kwargs["thinking_config"] = thinking_config
+        config = types.GenerateContentConfig(**config_kwargs)
 
         raw_input = None
         error = None
