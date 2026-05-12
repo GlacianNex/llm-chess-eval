@@ -145,19 +145,38 @@ class GeminiAdapter:
                     in_tok = getattr(usage_meta, "prompt_token_count", 0) or 0
                     out_tok = getattr(usage_meta, "candidates_token_count", 0) or 0
 
-                # Find the function call in the candidate parts
+                # Find the function call in the candidate parts. Also capture
+                # finish_reason so we can detect MAX_TOKENS (= length cap) and
+                # let the games.py stepdown trigger fire on Gemini.
                 fc = None
+                finish_reason = None
+                text_preview = ""
                 for cand in getattr(resp, "candidates", []) or []:
+                    if finish_reason is None:
+                        finish_reason = getattr(cand, "finish_reason", None)
                     parts = getattr(cand.content, "parts", []) or []
                     for part in parts:
                         if getattr(part, "function_call", None) is not None:
                             fc = part.function_call
                             break
+                        # Capture any text the model emitted instead of a tool call (rare)
+                        if not text_preview:
+                            text_preview = (getattr(part, "text", "") or "")[:120]
                     if fc is not None:
                         break
 
                 if fc is None:
-                    error = "Model did not call submit_move"
+                    # Normalize Gemini's MAX_TOKENS finish reason to include
+                    # the literal substring "length" so the games.py stepdown
+                    # trigger (which greps for finish_reason='length') matches
+                    # for both OpenAI and Gemini without provider-specific code.
+                    fr_str = str(finish_reason) if finish_reason is not None else "None"
+                    fr_normalized = "length" if "MAX_TOKENS" in fr_str else fr_str
+                    error = (
+                        f"Model did not call submit_move "
+                        f"(finish_reason='{fr_normalized}', gemini_raw='{fr_str}', "
+                        f"content_preview='{text_preview}')"
+                    )
                 else:
                     raw_input = dict(fc.args) if fc.args else {}
             except Exception as e:  # noqa: BLE001
