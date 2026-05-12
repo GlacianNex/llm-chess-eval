@@ -1,5 +1,16 @@
 """Game eval: model plays full games vs Stockfish. Every move instrumented.
 
+Per-move progress logging
+=========================
+Each API call attempt emits one line to stdout (flushed) and one JSONL line
+to `<run_dir>/progress.jsonl`. Format of the stdout line:
+
+    [PROGRESS] game=<game_id> ply=<N> attempt=<K>/<MAX> elapsed=<sec>s ...
+
+This gives an external monitor visibility down to the per-call level. Even
+when a single game takes 30+ minutes, the monitor sees an event every API
+call (typically every 5-60 seconds depending on the model).
+
 Three modes for handling illegal model moves:
   - "forfeit"    (default): game ends on first illegal, model loses
   - "substitute": Stockfish-best is played in place of the illegal move; game continues.
@@ -19,6 +30,10 @@ per_move_quality blends positional quality and retry-penalty:
 """
 from __future__ import annotations
 
+import json
+import sys
+import time
+from pathlib import Path
 from typing import Literal
 
 import chess
@@ -29,6 +44,48 @@ from ..config import stockfish_path
 from ..engine import analyse_pov
 from ..evals.consistency import CLAIM_FIELDS, _compare, ground_truth_claims
 from ..types import GameRecord, MoveRecord
+
+
+def _log_progress(
+    progress_path: Path | None,
+    game_id: str,
+    model: str,
+    ply: int,
+    attempt: int,
+    max_attempts: int,
+    elapsed_s: float,
+    event: str,
+    note: str = "",
+) -> None:
+    """Emit per-attempt progress to stdout (line-buffered) AND a side JSONL.
+
+    Lets an external monitor see per-call activity without waiting for the
+    whole game to complete. Format chosen so a `tail -f`'d progress.jsonl or
+    a `grep PROGRESS` over stdout both work.
+    """
+    line = (
+        f"[PROGRESS] game={game_id.split('__')[-1]} model={model} "
+        f"ply={ply} attempt={attempt}/{max_attempts} elapsed={elapsed_s:.1f}s "
+        f"event={event} {note}".rstrip()
+    )
+    print(line, flush=True)
+    sys.stdout.flush()
+    if progress_path is not None:
+        try:
+            with progress_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "ts": time.time(),
+                    "game_id": game_id,
+                    "model": model,
+                    "ply": ply,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "elapsed_s": elapsed_s,
+                    "event": event,
+                    "note": note,
+                }) + "\n")
+        except Exception:
+            pass  # never let logging kill the run
 
 GameMode = Literal["forfeit", "substitute", "retry"]
 MATE_CLAMP = 100000
@@ -96,6 +153,7 @@ def play_game(
     starting_fen: str | None = None,
     mode: GameMode = "forfeit",
     max_retries: int = 3,
+    progress_path: Path | None = None,
 ) -> GameRecord:
     if color not in ("white", "black"):
         raise ValueError("color must be 'white' or 'black'")
@@ -141,7 +199,15 @@ def play_game(
 
                 # Single attempt for forfeit/substitute; multiple for retry.
                 max_attempts = (max_retries + 1) if mode == "retry" else 1
+                ply_start_ts = time.perf_counter()
                 for attempt_idx in range(max_attempts):
+                    _log_progress(
+                        progress_path, game_id, adapter.model, ply_count,
+                        attempt_idx + 1, max_attempts,
+                        time.perf_counter() - ply_start_ts,
+                        "call_start",
+                        f"prior_failed={failed_attempts}" if failed_attempts else "",
+                    )
                     (
                         raw,
                         parsed_move,
@@ -153,6 +219,13 @@ def play_game(
                         _chosen_cand,
                     ) = _attempt_move(adapter, board, failed_attempts)
                     total_latency += latency_ms
+                    _log_progress(
+                        progress_path, game_id, adapter.model, ply_count,
+                        attempt_idx + 1, max_attempts,
+                        time.perf_counter() - ply_start_ts,
+                        "call_done" if parsed_move is not None else ("call_illegal" if chosen_san else "call_no_tool"),
+                        f"san={chosen_san!r} latency_ms={latency_ms}" + (f" err={err[:80]}" if err else ""),
+                    )
                     last_raw = raw
                     last_err = err
                     last_cand_legal_rate = cand_legal_rate

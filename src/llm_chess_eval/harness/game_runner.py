@@ -34,6 +34,7 @@ def run_games(
     console = console or Console()
     run_id, run_dir = make_run_dir(adapter.model, skill, mode)
     out_path = run_dir / "games.jsonl"
+    progress_path = run_dir / "progress.jsonl"
 
     records: list[GameRecord] = []
     with out_path.open("w", encoding="utf-8") as f:
@@ -52,6 +53,7 @@ def run_games(
                 max_plies=max_plies,
                 mode=mode,
                 max_retries=max_retries,
+                progress_path=progress_path,
             )
             f.write(record.model_dump_json() + "\n")
             f.flush()
