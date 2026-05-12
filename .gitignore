@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Virtual env
+.venv/
+venv/
+
+# Env files (NEVER commit API keys)
+.env
+.env.local
+*.key
+
+# Results / artifacts
+runs/
+data/cache/
+*.jsonl.tmp
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local config (personal allowlist; not for team)
+.claude/settings.local.json
+
+# Logs / tmp
+*.log
+*.tmp

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-chess-eval"
+version = "0.1.0"
+description = "Chess-based evaluation of LLM logical thinking (legality, consistency, puzzles, ELO)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40",
+    "python-chess>=1.999",
+    "pydantic>=2.7",
+    "click>=8.1",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+# Optional provider SDKs — install only the ones you need.
+openai   = ["openai>=1.50"]
+google   = ["google-genai>=0.3"]
+all      = ["openai>=1.50", "google-genai>=0.3"]
+
+[project.scripts]
+llm-chess-eval = "llm_chess_eval.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_chess_eval"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]

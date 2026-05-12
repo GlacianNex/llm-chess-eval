@@ -1,0 +1,20 @@
+{"position_id":"start","fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","source":"hand","notes":"Starting position. Any of 20 legal first moves is fine."}
+{"position_id":"after_e4","fen":"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1","source":"hand","notes":"Black to move after 1.e4."}
+{"position_id":"open_sicilian","fen":"rnbqkb1r/pp2pppp/3p1n2/8/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 0 5","source":"hand","notes":"Open Sicilian after early exchanges; many sensible moves."}
+{"position_id":"italian_main","fen":"r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4","source":"hand","notes":"Italian Game main line; classical development."}
+{"position_id":"ruy_lopez_main","fen":"r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3","source":"hand","notes":"Ruy Lopez after 3.Bb5."}
+{"position_id":"kings_indian","fen":"rnbqk2r/ppppppbp/5np1/8/2PP4/2N2N2/PP2PPPP/R1BQKB1R b KQkq - 4 4","source":"hand","notes":"King's Indian setup."}
+{"position_id":"kq_vs_k","fen":"4k3/8/8/8/8/8/8/4K2Q w - - 0 1","source":"hand","notes":"K+Q vs K. White must coordinate for mate."}
+{"position_id":"kr_vs_k","fen":"4k3/8/8/8/8/8/8/4K2R w K - 0 1","source":"hand","notes":"K+R vs K (castling rights set but white king already on e1 with rook on h1 — castling is legal here)."}
+{"position_id":"kp_vs_k_lucena","fen":"1K6/1P6/8/8/8/8/4k3/8 w - - 0 1","source":"hand","notes":"K+P vs K, Lucena-style winning position for white."}
+{"position_id":"opposite_bishops","fen":"8/8/3k4/8/3P4/3K4/2B5/5b2 w - - 0 1","source":"hand","notes":"Opposite-colored bishops endgame."}
+{"position_id":"fork_n_to_c7","fen":"r1bqkbnr/ppp2ppp/2n5/3pp3/3PP3/2N2N2/PPP2PPP/R1BQKB1R w KQkq - 0 5","source":"hand","notes":"Middlegame with knight tactics in the air."}
+{"position_id":"promotion_imminent","fen":"8/3P1k2/8/8/8/8/5K2/8 w - - 0 1","source":"hand","notes":"White pawn on 7th, promotion next move."}
+{"position_id":"en_passant_available","fen":"rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3","source":"hand","notes":"White can play exf6 e.p. (or not)."}
+{"position_id":"castle_both_sides","fen":"r3k2r/pppq1ppp/2np1n2/2b1p1B1/2B1P3/2NP1N2/PPPQ1PPP/R3K2R w KQkq - 6 8","source":"hand","notes":"Both sides have full castling rights and can castle either way."}
+{"position_id":"only_one_legal_move","fen":"7k/8/6KP/8/8/8/8/8 b - - 0 1","source":"hand","notes":"Black has exactly one legal move (Kg8). Tests forced-move handling."}
+{"position_id":"underpromotion_choice","fen":"8/1P3k2/8/8/8/8/5K2/8 w - - 0 1","source":"hand","notes":"Promotion this move; multiple promotion pieces possible."}
+{"position_id":"tactic_pin","fen":"r1bqk2r/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 6","source":"hand","notes":"Pin and development tension."}
+{"position_id":"endgame_zugzwang","fen":"6k1/6p1/6K1/8/8/8/8/8 w - - 0 1","source":"hand","notes":"K+K endgame, only kings — draw, tests handling of dead-drawn material."}
+{"position_id":"black_to_move_middle","fen":"r2q1rk1/1p2bppp/p1n1pn2/8/2PP4/2N1BN2/PP2BPPP/R2Q1RK1 b - - 0 11","source":"hand","notes":"Quiet QGD-type middlegame, Black to move."}
+{"position_id":"complex_middle","fen":"r2qr1k1/pp1n1ppp/2pb1n2/3p4/3P1B2/2NBPN2/PPQ2PPP/R4RK1 w - - 0 12","source":"hand","notes":"Rich middlegame with multiple plans."}
