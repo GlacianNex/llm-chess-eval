@@ -18,8 +18,16 @@ CR is the mean of game_score across N games.
 
 Default config:
     - retry mode with max_retries = 10 (so games have many chances to complete)
-    - RETRY_PENALTY_BASE = 0.5  (1 retry → 0.5, 3 retries → 0.125, 10 retries → 0.001)
+    - RETRY_PENALTY_BASE = 0.25 (1 retry → 0.25, 2 retries → 0.0625, 3 retries → 0.016)
     - Stockfish skill 3, max_moves 40
+
+The penalty base was originally 0.5 (first retry costs 50%) but the matrix
+showed that base too forgiving — models were achieving solid CR scores while
+needing many retries per move. In a real game an illegal move is fatal; the
+eval is a generosity-graded approximation of that. 0.25 makes each retry
+cost 75% rather than 50%, so the score more honestly reflects "could the
+model play legal chess on first attempt." Existing games.jsonl data does
+not need re-collection — only re-scoring.
 
 The combination of "many tries, steep decay" lets weak models complete games
 (so we see their late-game move quality) while ensuring retry-heavy moves
@@ -41,7 +49,7 @@ from pathlib import Path
 from ..types import GameRecord, MoveRecord
 
 CP_LOSS_CAP = 1000
-RETRY_PENALTY_BASE = 0.5
+RETRY_PENALTY_BASE = 0.25
 DEFAULT_MAX_RETRIES = 10
 
 
