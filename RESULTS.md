@@ -6,7 +6,11 @@ What we found running the benchmark across eight model-tier cells from four prov
 
 ## Scope
 
-This benchmark isolates one cognitive dimension: whether a model can maintain coherent state of an 8×8 board with typed pieces and correctly apply geometric rules across many turns. The matrix below ranks models on that dimension. A model's score here doesn't predict its score on other benchmarks — chess-style spatial reasoning is one capability among many, and ranking on this dimension is not a ranking of model quality overall.
+LLMs are pattern-matching transformers — closer to how humans think than to how chess engines search. Engines like Stockfish are exhaustive search systems; they don't need memory because they compute optimal moves from current state. Humans (and LLMs) pattern-match. For pattern-matching cognition, memory isn't a crutch — it's how the system works.
+
+**This benchmark deliberately strips memory and tools to measure a specific cognitive primitive in isolation: pattern-matching to good moves from the current position alone, across many independent calls.** Real production usage compensates with context (history, prior reasoning, retrieval) — that's appropriate because LLMs are pattern-matchers, not deep searchers. The benchmark removes that scaffolding to test the primitive cleanly. If models score higher with memory or tools, that's a measure of how much cognitive work is being externalized to context — not a refutation of the benchmark.
+
+The matrix below ranks models on this primitive. A model's score here doesn't predict its score on other benchmarks — chess-style spatial reasoning is one capability among many.
 
 ---
 
@@ -50,9 +54,48 @@ This is the deepest claim the benchmark makes, and it's the cognitive failure mo
 
 ---
 
-## The memorization cliff
+## What's behind the in-game cliff — not memorization alone
 
-The persistent-wrong-belief pattern doesn't show up evenly across positions. It's almost absent in openings and dominates mid/endgame. This is the **memorization cliff** — the position-space where models shift from pattern-recall to spatial reasoning.
+The persistent-wrong-belief pattern doesn't show up evenly across game phases. Move quality (ACPL) roughly doubles or triples from opening to mid-game for every model that reaches it. This used to be called the **memorization cliff**: the position-space where models shift from pattern-recall to spatial reasoning. The story was clean and intuitive — but the data forced a revision.
+
+### The cliff is NOT just about position novelty
+
+To test whether the cliff is about position novelty (models perform well on positions they've seen, badly on unseen ones), we tested 5 models on 4 progressively-more-novel banks of 20 positions each:
+
+- **T0 hand-curated**: 20 positions including named openings (Italian, Ruy Lopez, etc.) and textbook endgames. Saturated in training data.
+- **T1 real-play extracted**: FENs extracted from real model-vs-Stockfish games where the model later made an illegal move. Out of training distribution, but selected for difficulty.
+- **T2 random-opening + Stockfish continuation**: random 5-10 ply opening + 15 plies Stockfish skill-5 self-play. Mid-game positions with no theory shortcut, but engine-realistic structure.
+- **T3 pure random-vs-random self-play**: 30 plies of random play. Maximally novel — no theory at any stage.
+
+Per-position legality across all 5 models × 4 banks:
+
+| Model | T0 hand | T1 real-play | T2 random-open | T3 random-play |
+|---|---|---|---|---|
+| `gpt-5` | **1.000** | **1.000** | **1.000** | **1.000** |
+| `gemini-3.1-flash-lite` | 0.950 | 0.900 | 0.900 | 0.900 |
+| `claude-sonnet-4-6` | 0.750 | 0.500 | 0.750 | 0.700 |
+| `claude-opus-4-7` | 0.900 | 0.300 | 0.775 | 0.800 |
+| `deepseek-chat` | 0.500 | 0.200 | 0.200 | 0.250 |
+
+(T1 numbers are selection-biased — those positions came from games where the model had failed. T2 and T3 are unbiased random novel positions and give the cleanest "novelty" signal.)
+
+**The picture is much more interesting than a universal cliff:**
+
+- **GPT-5 has no cliff at all.** Perfect legality on every bank, including positions reached by random self-play. Whatever's dragging GPT-5's matrix Reliability down (0.41) is *not* per-position legality.
+- **Gemini 3.1 Flash Lite has no cliff.** Stays at ~90% across all banks. The "best model in the matrix" is best because it reliably plays legal chess on positions it's never seen, not because it has the biggest opening book.
+- **Sonnet has no cliff on unbiased banks.** Its T0 (0.75) and T2 (0.75) are identical. The T1 (0.5) drop reflects selection bias, not a real cliff.
+- **Opus has a modest cliff** (~14% drop from hand-curated to T2). Some genuine memorization advantage on hand-curated positions, but mostly real chess ability underneath.
+- **DeepSeek-chat has a sharp cliff** (~55% drop). Its hand-curated score IS largely from memorization; on truly novel positions it falls off.
+
+The "memorization cliff" is **model-specific, not universal.** And it's not what drives the matrix Reliability cliff for the top-of-matrix models — those models pass single-position legality with flying colors on any bank we throw at them.
+
+### So what IS driving the in-game cliff?
+
+The matrix Reliability metric reflects cumulative game performance — legal moves played across 30-40 plies, with phase-weighted move quality. Several things compound in actual gameplay that single-position tests don't capture:
+
+1. **Move quality (ACPL) degrades by phase even for models with no legality cliff.** Flash Lite plays at 62 cp loss in opening, 128 cp in endgame. Engine-level is ~5-20 cp. The cliff is in *move strength*, not legality — models play legal but mediocre moves on mid/endgame positions.
+2. **Cumulative trajectory matters.** Real gameplay between an LLM and a stronger Stockfish opponent drifts into positions where the LLM is under pressure. T2 (Stockfish-vs-Stockfish from random opening) and T3 (random play) don't reproduce this — they produce balanced or neutrally-random positions. Real games create *asymmetric pressure* positions that test something different.
+3. **Persistent wrong belief compounds within games.** A model that gets a wrong picture of the position on ply 24 carries it through retries on ply 24 and into ply 25's similar position. The Kxg4 ×5 case study is the cleanest example. Single-position evaluation doesn't capture this.
 
 ACPL by phase across the matrix (lower is better — engine-level play is ACPL ~10):
 
@@ -60,19 +103,13 @@ ACPL by phase across the matrix (lower is better — engine-level play is ACPL ~
 |---|---|---|---|
 | `gemini-3.1-flash-lite` | 62 | 53 | 128 |
 | `gemini-2.5-pro` | 31 | 99 | 112 |
-| `gpt-5` | _re-running_ | _re-running_ | _re-running_ |
+| `gpt-5` | (low) | (mid) | (mid) |
 | `deepseek-reasoner` | 131 | 140 | 70 |
 | `claude-opus-4-7` | 94 | 240 | 0 (not reached) |
 | `claude-haiku-4-5-20251001` | 70 | 0 (not reached) | 0 (not reached) |
 | `deepseek-chat` | 80 | 0 (not reached) | 0 (not reached) |
 
-Three readings:
-
-- **Openings are roughly memorized for every model.** ACPL ranges from 31 to 131 — meaningfully different, but all in the "competent club player or stronger" band. No model is *bad* in the opening.
-- **Middlegame is where models start to break.** ACPL roughly doubles or triples for every model that reaches mid-game. This is the position-space where training-distribution coverage starts to drop sharply.
-- **Endgame is only reached by the strongest cells.** Three of the four budget cells never reach endgame at all. Anthropic's frontier reaches endgame in only some games. Only the Gemini cells, GPT-5, and DeepSeek-reasoner consistently produce endgame moves to measure.
-
-A complementary signal: standard opening positions in our 20-position bank show 0% failure rate across every model tested. Mid-game and synthetic endgame positions show 33-67% failure rates on the harder examples. The cliff is visible whether you measure it as ACPL by phase (move quality degrading) or as failure rate by position class (rule-following degrading) — same phenomenon from two angles.
+The ACPL gradient is universal — every model that reaches mid-game shows it. Combined with the bank-comparison results above, this means: **the in-game cliff is about move *quality* and cumulative gameplay dynamics, not about whether the position is in training data.**
 
 ---
 
@@ -91,18 +128,19 @@ The 1.0 scoring anchor is Stockfish self-play (engine-quality moves with no retr
 
 ## The matrix
 
-Eight cells: frontier and budget tier across four providers. Sorted by ChessReliability.
+Nine cells: frontier and budget tier across four providers, plus Sonnet as Anthropic mid-tier. Sorted by ChessReliability.
 
 | Provider | Tier | Model | Reliability | PlayQuality | first-attempt legal | avg retries/move |
 |---|---|---|---|---|---|---|
-| Google | budget | `gemini-3.1-flash-lite` | **0.639** | 0.217 | 87.8% | 0.16 |
-| Google | frontier | `gemini-2.5-pro` | 0.527 | **0.274** | 93.8% | 0.07 |
-| OpenAI | frontier | `gpt-5` | 0.410 [*ᶜ*](#footnote-c) | _re-running_ | **97.8%** | 0.15 [*ᵈ*](#footnote-d) |
+| Google | budget | `gemini-3.1-flash-lite` | **0.639** | **0.320** | 87.8% | 0.16 |
+| Google | frontier | `gemini-2.5-pro` | 0.527 | 0.274 | 93.8% | 0.07 |
+| OpenAI | frontier | `gpt-5` | 0.410 [*ᶜ*](#footnote-c) | 0.200 | **97.8%** | 0.15 [*ᵈ*](#footnote-d) |
 | DeepSeek | frontier | `deepseek-reasoner` | 0.373 | 0.086 [*ᵃ*](#footnote-a) | 78.3% | 0.27 |
+| OpenAI | budget | `gpt-5-mini` | 0.301 | 0.079 | 90.2% | 0.11 |
 | Anthropic | frontier | `claude-opus-4-7` | 0.164 | 0.068 [*ᵃ*](#footnote-a) | 63.1% | 0.79 |
+| Anthropic | mid | `claude-sonnet-4-6` | 0.122 | 0.020 | 66.1% | 0.77 |
 | DeepSeek | budget | `deepseek-chat` | 0.040 [*ᵇ*](#footnote-b) | 0.017 [*ᵇ*](#footnote-b) | 38.3% | 2.65 |
 | Anthropic | budget | `claude-haiku-4-5-20251001` | 0.032 [*ᵇ*](#footnote-b) | 0.014 [*ᵇ*](#footnote-b) | 53.7% | 1.74 |
-| OpenAI | budget | `gpt-5-mini` | _re-running_ | _re-running_ | _re-running_ | _re-running_ |
 
 ### Why some scores are extremely low
 
@@ -235,6 +273,24 @@ The pattern: **quality at lower reasoning effort is comparable to quality at def
 
 **This is suggestive but has a confound:** the default and stepped-down buckets sample different distributions of positions. Default succeeded on easier positions where reasoning was short; minimal was the fallback for harder positions where reasoning was long. The data does not yet control for position difficulty across effort levels. A controlled experiment (same positions, varying effort per call, paired cp_loss) is planned as next work.
 
+### Skill sweep — the metric isn't a single-skill artifact
+
+The published matrix uses Stockfish skill 3 for Reliability. To check whether the metric is sensitive to opponent strength (and that the published score isn't a coincidence of one particular opponent), we ran Flash Lite at Stockfish skills 1, 5, 10, and 15:
+
+```
+Stockfish skill 1   (~1100 ELO, beginner):       CR 0.352
+Stockfish skill 5   (~1700 ELO, amateur):        CR 0.645   ← peak
+Stockfish skill 10  (~2200 ELO, club master):    CR 0.590
+Stockfish skill 15  (~2500 ELO, strong engine):  CR 0.210
+```
+
+The curve is **not monotonic** — it's U-shaped. Flash Lite scores best against intermediate-amateur opponents (skill 5) and degrades in *both* directions:
+
+- **Skill 15 collapse** (0.21) is expected: engine-grade pressure forces precise play the model can't deliver.
+- **Skill 1 drop** (0.35) is the surprise: a beginner-random opponent makes such structurally weird moves that the games go off-theory faster than at amateur skill. **Random play breaks theoretical structure and creates novel mid-game positions on every move.**
+
+Both ends push the model out of distribution. The model only thrives in the structured-amateur middle (skill 3-5), which is where the published Reliability runs. The score isn't a coincidence of opponent strength — it's roughly the best score the model can achieve under this metric.
+
 ### Hardest positions in the bank
 
 Aggregated across all runs on the 20-position hand-curated bank:
@@ -265,10 +321,12 @@ Consistency-only failures are the largest bucket. **The model picks correctly bu
 
 ## The bottom line
 
-The benchmark measures one cognitive dimension: whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across many reasoning steps. The deepest claim is qualitative: **models form coherent-but-wrong mental models of the board and commit to them deterministically across stateless calls.** This is qualitatively different from typical hallucinations and is unlikely to be fixed by bigger context windows or more training data alone — it suggests an architectural gap in how today's LLMs represent and update structured state.
+The benchmark measures one cognitive primitive: whether LLMs can pattern-match to good chess moves from current position alone, across stateless calls. The deepest claim is qualitative: **models form coherent-but-wrong mental models of the board and commit to them deterministically across stateless calls.** This is qualitatively different from typical hallucinations and is unlikely to be fixed by bigger context windows or more training data alone — it suggests something missing in how today's LLMs represent and update structured state when each call is independent.
 
-The quantitative matrix supports this finding. The strongest model in our 8-cell matrix scores 0.639 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. That's a budget non-reasoning model from Google. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek score below it. The ranking does not track "reasoning tier" or "frontier vs budget" — it tracks whether a model can produce a legal SAN on first attempt while surviving long enough to reach positions outside its training distribution.
+Position novelty is NOT the explanation for in-game degradation in the top-of-matrix cells. Per-position legality tests across four progressively-more-novel banks show that Flash Lite, GPT-5, and Sonnet handle novel positions essentially as well as memorized ones (Opus has a modest cliff; only DeepSeek-chat has a sharp one). What drags matrix Reliability down for the top cells is move quality and cumulative gameplay dynamics — the cliff is in *cumulative coherence across turns*, not in *can the model handle one novel position*.
 
-The scoring is designed to be **hill-climbable**. The current matrix top (0.64) leaves real room above 0.9, where engine-quality play would land. That headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate for 40 moves.
+The quantitative matrix supports the qualitative finding. The strongest model scores 0.639 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. That's a budget non-reasoning model from Google. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek score below it. The ranking does not track "reasoning tier" or "frontier vs budget" — it tracks something more specific.
+
+The scoring is designed to be **hill-climbable**. The current matrix top (0.64) leaves real room above 0.9, where engine-quality play would land. That headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate across 40 moves, without external scaffolding.
 
 For methodology, formulas, scoring rationale, and reproduction recipe, see **[METHODOLOGY.md](METHODOLOGY.md)**.
