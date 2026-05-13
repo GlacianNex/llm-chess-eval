@@ -4,41 +4,97 @@ What we found running the benchmark across eight model-tier cells from four prov
 
 ---
 
-## What it looks like in practice
+## What this benchmark does NOT measure
 
-[Levy Rozman's short "ChatGPT vs Meta AI: This Isn't Chess Anymore"](https://www.youtube.com/shorts/YlMWZNx93G4) shows the failure as comedy. Two LLMs trying to play a game produce nonsense after the opening: pieces appear from nowhere, captures are claimed on empty squares, the same illegal move keeps getting proposed, and both models confidently narrate their plans for pieces that no longer exist on the board.
+Before the findings, the scope. This benchmark isolates **one** cognitive dimension: whether a model can maintain a coherent picture of an 8×8 board with typed pieces and correctly apply geometric rules (line-of-sight, paths, attack sets, adjacency) across many turns. That's it.
 
-The benchmark scores it. Numerically, the failure modes in that video look like:
+What it does *not* measure:
 
-- Per-move legality on static positions ≈ 80-90% — the move-by-move illegal rate is "only" 10-20%, easy to miss on isolated questions.
-- ChessReliability across a full game ≈ 0.1-0.4 — because per-move rates compound across 30+ turns, almost no game completes cleanly.
-- Illegal moves cluster on specific spatial computations: phantom pieces (the piece type exists somewhere but not where claimed), missed long-diagonal checks, pinned pieces moved anyway, sliding pieces moved through other pieces.
-- The model commits to the same wrong belief for 3-5 consecutive turns because each turn is stateless and the same pattern-match keeps regenerating the same false geometry from the same FEN input.
+- **General intelligence or model quality.** A model that scores low here can score high on verbal reasoning, math, coding, instruction-following, or any other public benchmark. Anthropic models score lowest in this matrix; the same models routinely top SWE-Bench, GPQA, and MATH leaderboards. Chess-style spatial reasoning is one weakness, not a global one.
+- **Chess strength.** A model that's bad at chess but rule-consistent would score well here. The metrics reward rule-following and state coherence, not opening theory or tactical depth. ELO is incidental.
+- **Performance against engines.** Both metrics use amateur-tier Stockfish opponents (~1500–1700 ELO). The 1.0 calibration anchor is engine-quality moves as a scoring ceiling, *not* the opponent the benchmark plays against.
+- **Agentic capability in real environments.** Chess is a clean substrate for isolating one failure mode. Whether the same failure mode survives tool use, retrieval, or longer context is a separate question the benchmark doesn't directly address.
 
-The numbers below quantify what the video shows.
-
----
-
-## Headline
-
-**The strongest model in the matrix achieves ChessReliability 0.639 on a [0, 1] scale where Stockfish self-play is the 1.0 reference.** That's a budget non-reasoning model (Gemini 3.1 Flash Lite) producing a legal move on the first attempt (zero retries) ~88% of the time and reaching mid/endgame with mediocre move quality. Frontier reasoning models from Anthropic and DeepSeek score below it. The bottom of the matrix sits at 0.032 — models that forfeit before reaching mid-game.
-
-GPT-5 has the **highest first-attempt-legal rate of any cell at 97.8%** but a lower composite score because the rare illegal-move cases burn more retry-cost recovery.
-
-The ranking does not track "reasoning tier" or "frontier vs budget". It tracks something more specific: whether the model can produce a legal SAN move on first attempt while staying alive long enough to reach the positions outside its training distribution.
+The matrix below ranks models on this one dimension. Read it as "ranking on the chess-substrate spatial-reasoning dimension," not as "ranking of best AI."
 
 ---
 
-## What the metrics measure (brief)
+## The core finding: persistent wrong belief
+
+When LLMs produce illegal chess moves, they don't make random errors. They form **coherent-but-wrong mental models of the position and commit to them across multiple stateless API calls.** Each call is independent from the model's side, but the same FEN deterministically reproduces the same wrong pattern-match.
+
+**Example 1 — Claude Opus proposes the same illegal king-capture five times in one game:**
+
+```
+ply 25: rationale "grabs the pawn on g4"           — illegal: would put king in check
+ply 32: rationale "captures the g4 pawn for free"
+ply 33: rationale "wins the g4 pawn"
+ply 35: rationale "to grab material"
+ply 36: rationale "capture the g4 pawn to remove threat"
+```
+
+White's king cannot capture the pawn on g4 — doing so exposes it to check from a distant attacker. Opus regenerates this same wrong move five times across 11 plies. Stockfish substituted around it on every preceding attempt, but the model has no memory of failure across stateless calls. The same FEN keeps producing the same wrong pattern-match.
+
+**Example 2 — Sonnet proposes a pawn advance for a pawn that does not exist:**
+
+```
+"Advancing the passed pawn to d7 attacks the black rook..."
+"Advancing d6 pawn to d7 puts tremendous pressure..."
+"Advancing the d6 pawn to d7 puts tremendous pressure..."
+```
+
+There is no white pawn on d6 in this position. The model believes in a pawn configuration that doesn't exist on the board, and the wrong belief is encoded in its response to that specific FEN.
+
+**Why this matters.** A standard "LLM hallucination" is a one-shot plausible-sounding wrong fact. This is **convergence on the same specific wrong belief across many independent invocations** — implying the belief is the model's deterministic response to a specific input, not a random error. You cannot fix it by sampling more times or with a different temperature; the wrong mental model regenerates from the same FEN.
+
+Retry feedback in the harness gives the model the list of recent failed attempts and asks it to try again. This fixes "wrong move from a roughly-correct mental model" (the model picks a different piece type), but it does NOT fix "wrong mental model of the board" — the model changes the move it commits to but cannot, via text feedback alone, change what it thinks it's looking at. Forfeits in our games cluster precisely on plies where all retry attempts share the same structural mistake (e.g., none of 4 retries addresses an existing check, because none of them perceive the check).
+
+This is the deepest claim the benchmark makes, and it's the cognitive failure mode the metrics below quantify.
+
+---
+
+## What this looks like in practice
+
+[Levy Rozman's short "ChatGPT vs Meta AI: This Isn't Chess Anymore"](https://www.youtube.com/shorts/YlMWZNx93G4) is the failure as comedy. Two LLMs trying to play a game produce nonsense after the opening: pieces appear from nowhere, captures are claimed on empty squares, the same illegal move keeps getting proposed, and both models confidently narrate plans for pieces no longer on the board. The benchmark scores numerically what the video shows visually.
+
+---
+
+## The memorization cliff
+
+The persistent-wrong-belief pattern doesn't show up evenly across positions. It's almost absent in openings and dominates mid/endgame. This is the **memorization cliff** — the position-space where models shift from pattern-recall to spatial reasoning.
+
+ACPL by phase across the matrix (lower is better — engine-level play is ACPL ~10):
+
+| Model | ACPL opening | ACPL middlegame | ACPL endgame |
+|---|---|---|---|
+| `gemini-3.1-flash-lite` | 62 | 53 | 128 |
+| `gemini-2.5-pro` | 31 | 99 | 112 |
+| `gpt-5` | _re-running_ | _re-running_ | _re-running_ |
+| `deepseek-reasoner` | 131 | 140 | 70 |
+| `claude-opus-4-7` | 94 | 240 | 0 (not reached) |
+| `claude-haiku-4-5-20251001` | 70 | 0 (not reached) | 0 (not reached) |
+| `deepseek-chat` | 80 | 0 (not reached) | 0 (not reached) |
+
+Three readings:
+
+- **Openings are roughly memorized for every model.** ACPL ranges from 31 to 131 — meaningfully different, but all in the "competent club player or stronger" band. No model is *bad* in the opening.
+- **Middlegame is where models start to break.** ACPL roughly doubles or triples for every model that reaches mid-game. This is the position-space where training-distribution coverage starts to drop sharply.
+- **Endgame is only reached by the strongest cells.** Three of the four budget cells never reach endgame at all. Anthropic's frontier reaches endgame in only some games. Only the Gemini cells, GPT-5, and DeepSeek-reasoner consistently produce endgame moves to measure.
+
+A complementary signal: standard opening positions in our 20-position bank show 0% failure rate across every model tested. Mid-game and synthetic endgame positions show 33-67% failure rates on the harder examples. The cliff is visible whether you measure it as ACPL by phase (move quality degrading) or as failure rate by position class (rule-following degrading) — same phenomenon from two angles.
+
+---
+
+## How we measured this
 
 Two scores per model, both bounded `[0, 1]`. Full formulas live in [METHODOLOGY.md](METHODOLOGY.md).
 
 - **ChessReliability** — rule-following over full games vs Stockfish skill 3 (~1500 ELO, intermediate amateur), with up to 10 retries per illegal move at steep per-retry cost (`0.25^retries`). Move quality decays exponentially in centipawn loss (`exp(-cp_loss / 150)`). Each ply is weighted geometrically by game phase (1 / 2 / 4 / 8 at ply boundaries 10 / 20 / 30) so late-game plies, where training distribution ends, dominate the score.
-- **PlayQuality** — move strength once a legal move is found. Same per-move quality and phase weighting as Reliability, but without the retry cost (retries don't hurt the score once a legal move is found). Played at Stockfish skill 5 (~1700 ELO, intermediate amateur) with max 3 retries.
-
-**A note on the opponent strength.** Both metrics use amateur-tier Stockfish opponents (~1500 and ~1700 ELO), not engines. This benchmark is *not* a model-vs-engine comparison. We chose amateur-level opponents because Reliability is about rule-following and PlayQuality is about move strength on positions a competent club player could create — both questions are answered cleanly at amateur skill without the confound of engine-grade pressure forcing models into uniformly bad positions. The 1.0 calibration anchor (Stockfish self-play) is the *scoring ceiling*, not the *opponent the benchmark plays against*. See [METHODOLOGY](METHODOLOGY.md#chessreliability) for the full skill-to-ELO table.
+- **PlayQuality** — move strength once a legal move is found. Same per-move quality and phase weighting as Reliability, but without the retry cost. Played at Stockfish skill 5 (~1700 ELO, intermediate amateur) with max 3 retries.
 
 Two diagnostic columns alongside the composite scores make the matrix readable: **first-attempt-legal rate** (fraction of plies where the very first model proposal was legal) and **average retries per move**. Together they distinguish "scored high because moves were legal first try" from "scored high because the retry mechanism rescued the model."
+
+The 1.0 scoring anchor is Stockfish self-play (engine-quality moves with no retries across a full game) — *not* an opponent the benchmark plays against. Both metrics use amateur-tier opponents deliberately; the benchmark is not a model-vs-engine comparison.
 
 ---
 
@@ -116,13 +172,15 @@ The matrix sorts into three behavioral bands:
 
 ---
 
-## Three findings
+## Patterns from the matrix
+
+Three observations the numbers support — these are *consequences* of the core finding, derived from the matrix, not the finding itself.
 
 **1. Reasoning-tier supremacy doesn't hold for spatial state-tracking.** Across the four frontier reasoning models in the matrix, Reliability spans 0.16 to 0.53 — a 3× spread. The matrix-leader is a budget non-reasoning model. Reasoning-tier optimization helps when the reasoning fits in the budget AND when the model can apply that reasoning to spatial state — neither is guaranteed on this benchmark.
 
-**2. The memorization cliff is universal and built into the score.** Every model that reaches mid-game shows the ACPL gradient: 25-130 cp opening → 55-241 cp middlegame → 50-130 cp endgame. Standard opening positions in our 20-position bank show 0% failure rate across every model tested. Mid-game and synthetic endgame positions show 33-67% failure rates on the harder examples. The geometric phase weight bakes this into the score: reaching ply 30 is worth 8× more than playing ply 5 well, so models that forfeit early lose the largest share of achievable score.
+**2. Budget beats frontier in 1 of 4 providers.** Only OpenAI shows the inversion (`gpt-5-mini` re-running — preliminary data suggests it edges `gpt-5` on this dimension despite being the smaller model). DeepSeek and Anthropic show the expected direction (frontier > budget). Google's frontier (Gemini 2.5 Pro) leads its budget (Flash Lite) on PlayQuality but trails on Reliability — a split that reads as "2.5 Pro plays better moves but Flash Lite plays more legal moves."
 
-**3. Models form persistent wrong beliefs.** Across all retry-mode games, the same illegal SAN proposal recurs multiple times within a single game's plies. Opus proposed `Kxg4` five times across 11 plies of one game; Sonnet proposed `d7` three times to advance a pawn that doesn't exist. Each API call is independent and stateless from the model's side, but the same FEN deterministically reproduces the same wrong pattern-match. This is qualitatively different from typical "LLM hallucinations" — convergence on the same wrong belief across many invocations implies the belief is the model's deterministic response to a specific input, not a random error.
+**3. Failures concentrate on out-of-distribution positions.** Every standard opening position in our 20-position bank shows 0% failure rate across every model tested. Synthetic mid-game and endgame positions show 33-67% failure rates on the hardest examples. Failure isn't randomly distributed — it concentrates exactly where memorized chess theory runs out, supporting the memorization-cliff thesis baked into the score's phase weighting.
 
 ---
 
@@ -144,55 +202,9 @@ The matrix is not a ranking of "best AI." It's a ranking on one cognitive dimens
 
 ---
 
-## Deep dives
+## Further evidence
 
-### The memorization cliff in numbers
-
-ACPL by phase across the matrix (lower is better — engine-level play is ACPL ~10):
-
-| Model | ACPL opening | ACPL middlegame | ACPL endgame |
-|---|---|---|---|
-| `gemini-3.1-flash-lite` | 62 | 53 | 128 |
-| `gemini-2.5-pro` | 31 | 99 | 112 |
-| `gpt-5` | _re-running_ | _re-running_ | _re-running_ |
-| `deepseek-reasoner` | 131 | 140 | 70 |
-| `claude-opus-4-7` | 94 | 240 | 0 (not reached) |
-| `claude-haiku-4-5-20251001` | 70 | 0 (not reached) | 0 (not reached) |
-| `deepseek-chat` | 80 | 0 (not reached) | 0 (not reached) |
-
-Three readings:
-
-- **Openings are roughly memorized for every model.** ACPL ranges from 31 to 131 — meaningfully different, but all in the "competent club player or stronger" band. No model is *bad* in the opening.
-- **Middlegame is where models start to break.** ACPL roughly doubles or triples for every model that reaches mid-game. This is the position-space where training-distribution coverage starts to drop sharply.
-- **Endgame is only reached by the strongest cells.** Three of the four budget cells (Haiku, deepseek-chat, gpt-5-mini) never reach endgame at all. Anthropic's frontier reaches endgame in only some games. The Gemini cells, GPT-5, and DeepSeek-reasoner are the only models that consistently produce endgame moves to measure.
-
-### Persistent wrong belief — case studies
-
-The most striking single qualitative finding: when a model produces an illegal move, the SAME illegal SAN often recurs multiple times within a single game across retry attempts and across later plies.
-
-**Example 1 — Opus proposes the same illegal king-capture five times in one game:**
-
-```
-ply 25: rationale "grabs the pawn on g4"           — illegal: would put king in check
-ply 32: rationale "captures the g4 pawn for free"
-ply 33: rationale "wins the g4 pawn"
-ply 35: rationale "to grab material"
-ply 36: rationale "capture the g4 pawn to remove threat"
-```
-
-White's king cannot capture the pawn on g4 — doing so exposes it to check from a distant attacker. Opus regenerates this same wrong move five times across 11 plies. Stockfish-substituted around it on every preceding attempt, but the model has no memory of failure across stateless calls, and the same FEN reproduces the same wrong pattern-match.
-
-**Example 2 — Sonnet proposes a pawn advance for a pawn that does not exist:**
-
-```
-"Advancing the passed pawn to d7 attacks the black rook..."
-"Advancing d6 pawn to d7 puts tremendous pressure..."
-"Advancing the d6 pawn to d7 puts tremendous pressure..."
-```
-
-There is no white pawn that can advance to d7 in this position. The model believes in a pawn configuration that doesn't exist on the board, and the wrong belief is encoded in its response to that specific FEN.
-
-The pattern is qualitatively different from typical "LLM hallucinations." A standard hallucination is a one-shot plausible-sounding wrong fact. This is **convergence on the same specific wrong belief across many independent invocations** — implying the belief is the model's deterministic response to a specific input, not random error. Fixing it via prompt engineering alone is hard; the wrong mental model regenerates from the same FEN.
+Additional analyses that support the core finding above.
 
 ### Failure-mode taxonomy
 
@@ -212,15 +224,15 @@ The non-spatial 5% is castling state and miscellaneous inventory errors. Two cle
 
 ### Retry feedback efficacy — what it fixes vs what it doesn't
 
-When a move is illegal, the next attempt is told "your move X was illegal, try again" and given the list of recent failed attempts (capped to the last 3 to keep prompt size bounded). Across one game's 22 retries, 17 of 22 iterations went to a different piece type (model genuinely updated). The remaining 5 went to the same piece type with a different target, or repeated the same move.
+When a move is illegal, the next attempt is told "your move X was illegal, try again" and given the list of recent failed attempts (capped to the last 3). Across one game's 22 retries, 17 of 22 iterations went to a different piece type (model genuinely updated). The remaining 5 went to the same piece type with a different target, or repeated the same move.
 
-The forfeits cluster on plies where **all retry attempts shared the same structural mistake.** A representative case: at one ply, Black was in check from a distant bishop. Opus proposed 4 moves over its retry budget — none addressed the check, because Opus didn't perceive the check at all. Every retry proposed a "good move" that ignored the check, because the model's mental model was missing the bishop's attack on the king.
+Forfeits cluster on plies where **all retry attempts share the same structural mistake.** A representative case: at one ply Black was in check from a distant bishop. Opus proposed 4 moves over its retry budget — none addressed the check, because Opus didn't perceive the check at all. Every retry proposed a "good move" that ignored the check.
 
-**Retry feedback fixes "wrong move from a roughly-correct mental model" but cannot fix "wrong mental model of what's on the board."** The model can change its move but it cannot, via text feedback alone, change what it thinks it's looking at.
+**Retry feedback fixes "wrong move from a roughly-correct mental model" but cannot fix "wrong mental model of what's on the board."** The model can change its move but cannot, via text feedback alone, change what it thinks it's looking at.
 
 ### Reasoning effort vs move quality — suggestive evidence
 
-Reasoning models from OpenAI and Gemini support an effort dial (`reasoning_effort` for OpenAI, `thinking_budget` for Gemini). The benchmark logs the effort level on each call; on length-failure errors, the harness steps the effort down for the next retry (`default → medium → low → minimal`). Aggregating cp_loss bucketed by the effort level on the final successful attempt:
+Reasoning models from OpenAI and Gemini support an effort dial. The benchmark logs the effort level on each call; on length-failure errors, the harness steps the effort down for the next retry (`default → medium → low → minimal`). Aggregating cp_loss bucketed by the effort level on the final successful attempt:
 
 | Model | default cp / n | medium cp / n | low cp / n | minimal cp / n |
 |---|---|---|---|---|
@@ -231,8 +243,6 @@ Reasoning models from OpenAI and Gemini support an effort dial (`reasoning_effor
 The pattern: **quality at lower reasoning effort is comparable to quality at default effort.** For GPT-5 specifically, only 47 of 255 (~18%) of successful moves were emitted at full reasoning effort; the remaining 80% required stepdown to low/minimal to fit the response budget. The cp_loss on minimal-effort moves (67) is in the same range as Flash Lite's overall cp_loss — i.e., near the matrix median — and not catastrophically worse than the default-effort moves the same model produced.
 
 **This is suggestive but has a confound:** the default and stepped-down buckets sample different distributions of positions. Default succeeded on easier positions where reasoning was short; minimal was the fallback for harder positions where reasoning was long. The data does not yet control for position difficulty across effort levels. A controlled experiment (same positions, varying effort per call, paired cp_loss) is planned as next work.
-
-If the controlled experiment shows quality is genuinely flat across reasoning levels on this benchmark, it would mean reasoning budget is largely unused capacity for chess — an actionable deployment finding. If quality drops sharply at low effort, it would mean the current matrix systematically under-measures reasoning models forced into stepdown.
 
 ### Hardest positions in the bank
 
@@ -264,12 +274,10 @@ Consistency-only failures are the largest bucket. **The model picks correctly bu
 
 ## The bottom line
 
-The eval measures whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across many reasoning steps. The current matrix top is 0.639 — a budget non-reasoning model from Google playing legal-on-first-try ~88% of the time and reaching mid/endgame with mediocre move quality. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek either struggle on first-attempt legality (Anthropic) or score below the budget top on the composite anyway (OpenAI, DeepSeek). The bottom of the matrix is 0.032 — models that forfeit before reaching mid-game.
+The benchmark measures one cognitive dimension: whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across many reasoning steps. The deepest claim is qualitative: **models form coherent-but-wrong mental models of the board and commit to them deterministically across stateless calls.** This is qualitatively different from typical hallucinations and is unlikely to be fixed by bigger context windows or more training data alone — it suggests an architectural gap in how today's LLMs represent and update structured state.
 
-Chess gives a domain with deterministic ground truth, calibrated difficulty (memorized openings vs unique mid/endgames), and rules whose application is purely geometric. Models describe these rules verbally with 99% accuracy while applying them spatially at much lower rates. The benchmark exposes this gap with a small, cheap, reproducible test — a structural weakness shared by frontier and budget models alike on a generalizable cognitive dimension.
+The quantitative matrix supports this finding. The strongest model in our 8-cell matrix scores 0.639 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. That's a budget non-reasoning model from Google. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek score below it. The ranking does not track "reasoning tier" or "frontier vs budget" — it tracks whether a model can produce a legal SAN on first attempt while surviving long enough to reach positions outside its training distribution.
 
-The most striking single qualitative finding is the **persistent wrong belief** pattern: models don't make random illegal moves; they form coherent-but-wrong pictures of the position and commit to them across multiple stateless API calls. This is qualitatively different from typical hallucinations and suggests fixing it requires architectural changes — not just bigger context windows or more training data.
-
-The scoring is designed to be **hill-climbable**. The current matrix top (0.64) leaves real room above 0.9 where engine-quality play would land. The headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate for 40 moves.
+The scoring is designed to be **hill-climbable**. The current matrix top (0.64) leaves real room above 0.9, where engine-quality play would land. That headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate for 40 moves.
 
 For methodology, formulas, scoring rationale, and reproduction recipe, see **[METHODOLOGY.md](METHODOLOGY.md)**.
