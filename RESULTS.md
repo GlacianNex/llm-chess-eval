@@ -57,10 +57,6 @@ Eight cells: frontier and budget tier across four providers. Sorted by ChessReli
 | Anthropic | budget | `claude-haiku-4-5-20251001` | 0.032 [*ᵇ*](#footnote-b) | 0.014 [*ᵇ*](#footnote-b) | 53.7% | 1.74 |
 | OpenAI | budget | `gpt-5-mini` | _re-running_ | _re-running_ | _re-running_ | _re-running_ |
 
-Click the marker on any annotated cell to jump to its explanation: [*ᵃ*](#footnote-a) early forfeit at skill 5 · [*ᵇ*](#footnote-b) failure floor · [*ᶜ*](#footnote-c) Reliability ≠ first-attempt-legal · [*ᵈ*](#footnote-d) avg-retries reads backwards from first-attempt-legal
-
-`gemini-3.1-pro-preview` is on a 250 req/day cap (Google's preview-track policy applies regardless of paid tier) — too tight for a full gauntlet with retries. We use the GA `gemini-2.5-pro` for the published frontier-Google cell.
-
 ### Why some scores are extremely low
 
 The geometric phase weight (`1 / 2 / 4 / 8` at ply boundaries 10 / 20 / 30) means roughly half of the achievable score lives in plies 20+. A model that forfeits before reaching mid-game loses access to that half in both the numerator AND has it weighing against them in the denominator. Combined with the `0.25^retries` cost and the exponential quality decay, scores below 0.10 are the natural floor for models that can't survive long.
