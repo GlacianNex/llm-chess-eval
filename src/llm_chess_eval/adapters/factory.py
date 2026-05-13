@@ -31,7 +31,7 @@ def build_adapter(model: str, augment_legal_moves: bool = False, max_tokens: int
     but this factory-level 2048 override won. The result: GPT-5 and
     GPT-5-mini ran the entire v2 matrix at max_completion_tokens=2048
     (reasoning + output combined), which exhausted before any tool call
-    could be emitted on ~98% of plies. See HANDOFF.md for the corrected
+    could be emitted on ~98% of plies. See RESULTS.md for the corrected
     OpenAI numbers after re-running with this fix.
     """
     pytool = model.endswith("-pytool")
