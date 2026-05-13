@@ -48,7 +48,7 @@ Eight cells: frontier and budget tier across four providers. Sorted by ChessReli
 |---|---|---|---|---|---|---|
 | Google | budget | `gemini-3.1-flash-lite` | **0.639** | 0.217 | 87.8% | 0.16 |
 | Google | frontier | `gemini-2.5-pro` | 0.527 | **0.274** | 93.8% | 0.07 |
-| OpenAI | frontier | `gpt-5` | 0.410 | _re-running_ | **97.8%** | 0.15 |
+| OpenAI | frontier | `gpt-5` | 0.410 *<sup>c</sup>* | _re-running_ | **97.8%** | 0.15 |
 | DeepSeek | frontier | `deepseek-reasoner` | 0.373 | 0.086 *<sup>a</sup>* | 78.3% | 0.27 |
 | Anthropic | frontier | `claude-opus-4-7` | 0.164 | 0.068 *<sup>a</sup>* | 63.1% | 0.79 |
 | DeepSeek | budget | `deepseek-chat` | 0.040 *<sup>b</sup>* | 0.017 *<sup>b</sup>* | 38.3% | 2.65 |
@@ -64,6 +64,8 @@ The geometric phase weight (`1 / 2 / 4 / 8` at ply boundaries 10 / 20 / 30) mean
 ***<sup>a</sup>*** **`0.068`–`0.086` (Opus PlayQuality, DeepSeek-reasoner PlayQuality)**: model produces legal moves on most first attempts (63–78%) and plays moves of reasonable quality (cp_loss 80–240 on the plies it reaches), but the games rarely survive into endgame at Stockfish skill 5. With only 3 retries permitted in PlayQuality mode (vs Reliability's 10), even occasional length-failures and run-of-bad-positions cause early forfeits. Result: the high-weight late plies are mostly missing from the numerator while still counting toward the denominator.
 
 ***<sup>b</sup>*** **`0.014`–`0.040` (Haiku, DeepSeek-chat — both metrics)**: first-attempt-legal rate of 38–54% means roughly half of all moves are illegal on the first try. Each of those moves pays the `0.25^retries` cost (1 retry → 25% credit, 2 retries → 6%). Combined with games averaging only 10–20 plies before forfeiting on illegal moves they can't recover from, the score is dominated by missing late-game plies and retry-cost-eroded mid-game plies. This isn't a metric pathology — it's the metric correctly reflecting "model cannot reliably play legal chess past the opening, even with the retry safety net."
+
+***<sup>c</sup>*** **`0.410` (GPT-5 Reliability with 97.8% first-attempt-legal)**: the asterisk here is the *opposite* situation — the model produces a legal move on first attempt ~98% of the time, but the composite score is still moderate because Reliability multiplies three factors and first-attempt-legality is only one of them. GPT-5's mean cp_loss across legal moves is 86 → move_quality = exp(−86/150) = 0.564 (competent club play, not engine-level). One of the 5 games forfeited at ply 1, contributing 0 to the mean and subtracting ~0.20 from the composite. The remaining 4 games averaged 27 plies (vs max 40), missing the highest-weighted late-game plies. **High first-attempt-legal does not imply high Reliability** — read the columns together. [METHODOLOGY § Reliability is NOT first-attempt-legal](METHODOLOGY.md#reliability-is-not-first-attempt-legal--they-measure-different-things) walks through the decomposition.
 
 For specifics on the Anthropic cells in particular, see [the Anthropic note below](#a-note-on-the-anthropic-scores).
 

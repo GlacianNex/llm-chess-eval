@@ -77,6 +77,25 @@ The difference from ChessReliability is intentional and conceptual: Reliability 
 
 Both metrics use multiplicative structure so any factor near zero collapses the score. A model that forfeits at move 5 can't rescue the score with great opening play (the high-weight late plies in the denominator dominate). A model that drags out long games of mediocre moves can't rescue the score with completion (move_quality is low). A model that needs many retries to find legal moves can't rescue the score with eventual success (retry_cost is exponentially punitive).
 
+### Reliability is NOT first-attempt-legal — they measure different things
+
+The benchmark reports both **`first_attempt_legal_rate`** (a diagnostic — fraction of plies where the model's very first proposal was a legal SAN) and **`ChessReliability`** (the composite score). It's easy to assume "high first-attempt legality → high Reliability", but the composite has three factors and first-attempt-legality is only one of them. The other two can drag the score substantially even when legality is near-perfect:
+
+- **`move_quality(cp_loss)`**: a legal move with cp_loss = 86 has quality = exp(−86/150) = 0.564, not 1.0. Reaching engine-level play (cp_loss ~5) requires move_quality ~0.97. Most LLMs play moves with cp_loss in the 50-200 range — competent club-player territory, scoring 0.27-0.72 per move on quality alone.
+- **`game_phase_weight(ply)`**: ply-30+ moves are weighted 8×, ply-1-9 are weighted 1×. A model that forfeits early or stops at the max-ply cap before reaching late game loses access to the highest-weighted plies in the numerator while they remain in the denominator. The structural ceiling for a model that perfectly plays only to ply 20 (out of max 40) is ~0.18; perfectly to ply 30 is ~0.44; perfectly to ply 40 is 1.0.
+- **A single full forfeit** (game ends at ply 1 because the model can't produce a legal move even after all retries) drops that game's contribution to 0 regardless of how the other games went. In a 5-game gauntlet, one forfeit at ply 1 subtracts ~0.20 from the mean.
+
+A concrete example from the published matrix: **GPT-5 has 97.8% first-attempt-legal but ChessReliability = 0.410.** Decomposing:
+
+| Factor | Contribution |
+|---|---|
+| Mean cp_loss across legal moves: 86 → quality = 0.564 | Caps the score around 0.56 even if every move were legal |
+| One game forfeited at ply 1 (1 of 5) | Subtracts ~0.20 from mean |
+| Remaining 4 games averaged 27 plies played (vs max 40) | Misses the highest-weighted late plies; ~0.39 structural ceiling for play-to-ply-27 |
+| Retry cost (0.01 retries/move) | Negligible |
+
+The 0.41 composite is the product of "near-perfect legality × mid-range quality × partial late-game coverage." Read the columns together — first-attempt-legal alone is not a stand-in for Reliability.
+
 ### Reference points
 
 | Score | Equivalent |
