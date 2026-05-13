@@ -57,9 +57,9 @@ ChessReliability = mean of per_game_score across N games. Standard config: N = 5
 
 ### PlayQuality
 
-The model plays games vs Stockfish at skill 5 — approximately **1700 ELO, a strong amateur**. This is deliberate: the benchmark is not comparing LLMs to a chess engine. Stockfish at skill 5 plays at roughly the level of a competent club player, the kind of opponent that creates real but tractable positions an LLM with genuine chess understanding should be able to navigate. PlayQuality scores are *not* "performance vs engine" — they're "move quality across full games when the opponent is amateur-tier." Retry mode max 3 retries, no per-retry penalty. PlayQuality measures **how strong the model's moves are once it has found a legal one** — it doesn't penalize retry use.
+The model plays games vs Stockfish at skill 5 — approximately **1700 ELO, a intermediate amateur**. This is deliberate: the benchmark is not comparing LLMs to a chess engine. Stockfish at skill 5 plays at roughly the level of a competent club player, the kind of opponent that creates real but tractable positions an LLM with genuine chess understanding should be able to navigate. PlayQuality scores are *not* "performance vs engine" — they're "move quality across full games when the opponent is amateur-tier." Retry mode max 3 retries, no per-retry penalty. PlayQuality measures **how strong the model's moves are once it has found a legal one** — it doesn't penalize retry use.
 
-(For context on the full Stockfish skill range: skill 0 ≈ 1100 ELO beginner; skill 3 ≈ 1500 amateur — what Reliability uses; skill 5 ≈ 1700 strong amateur — what PlayQuality uses; skill 15 ≈ 2500 strong engine; skill 20 ≈ 2850 top engine. None of the current benchmark cells play against an engine-strength opponent.)
+(For context on the full Stockfish skill range: skill 0 ≈ 1100 ELO beginner; skill 3 ≈ 1500 amateur — what Reliability uses; skill 5 ≈ 1700 intermediate amateur — what PlayQuality uses; skill 15 ≈ 2500 strong engine; skill 20 ≈ 2850 top engine. None of the current benchmark cells play against an engine-strength opponent.)
 
 Per-move score:
 
