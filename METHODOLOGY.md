@@ -210,7 +210,7 @@ What would tighten the findings:
 
 ---
 
-## Notes on reasoning models
+## Things to be aware of
 
 A few provider-specific behaviors to keep in mind when running this benchmark on reasoning-tier models. These aren't findings — just things that affect how the harness interacts with the APIs.
 
