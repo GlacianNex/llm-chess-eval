@@ -96,54 +96,6 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 
 ---
 
-## Things to be aware of
-
-Operational issues that anyone running this benchmark — or porting it to a new provider — needs to know. These are not findings about the models; they're things that can corrupt your measurements if you don't account for them.
-
-### Token budgets on reasoning models include reasoning tokens
-
-OpenAI's `max_completion_tokens` and Google's `max_output_tokens` cap the total tokens a reasoning model can produce, **including internal reasoning**. If the model spends the entire budget reasoning, there are zero tokens left for the visible output — including the forced tool call. The model returns with `finish_reason='length'`, no tool call, no content.
-
-A naive harness records this as "model failed to follow the schema" → forfeit. **Don't conflate budget exhaustion with chess illegality.** The benchmark defaults `max_tokens=65536` for reasoning-capable providers; on this benchmark <0.1% of calls hit length at that budget. If you change the ceiling, audit your runs for `did not call submit_move` errors before drawing conclusions.
-
-Anthropic's API does not have this problem — `max_tokens` there counts output tokens only, with thinking budget tracked separately. The benchmark caps Anthropic at 8192 (rather than 65536) because Anthropic's SDK refuses non-streaming calls with very high `max_tokens`, and 8192 is plenty for a chess tool call's output.
-
-### Gemini's `MALFORMED_FUNCTION_CALL` is a related-but-different failure
-
-Gemini Pro and 2.5 Pro have a second failure mode where reasoning runs long enough to corrupt the structured tool output rather than hit a length cap — the API reports `finish_reason='MALFORMED_FUNCTION_CALL'` instead of `'length'`. Different proximate cause, same root (reasoning overrun corrupts tool emission). The benchmark's reasoning-effort fallback ladder triggers on both.
-
-### Gemini Pro Preview has a 250-request daily quota
-
-`gemini-3.1-pro-preview` is on a 250 requests/day cap, applied per model regardless of paid tier. Google enforces this on preview-track models; only GA models (like `gemini-2.5-pro`) have unrestricted per-tier quotas. A Reliability + PlayQuality gauntlet on a reasoning-heavy model with retries can burn 300-400 requests in a single run, so the cap is binding. The benchmark publishes the `gemini-2.5-pro` substitute for the frontier-Google cell.
-
-### How the benchmark handles these
-
-Four layers of defense are built in:
-
-1. **Generous `max_tokens` ceiling (65536) for reasoning-capable providers; 8192 for Anthropic** — covers >99% of calls at full reasoning effort.
-2. **`previously_failed_sans` list capped to last 3 attempts** — keeps the retry-context prompt bounded so reasoning doesn't expand to re-analyze a long history of failed SANs.
-3. **Reasoning-effort fallback ladder on overrun failures** — when a call hits `finish_reason='length'` or `MALFORMED_FUNCTION_CALL`, the next retry on that move drops reasoning effort one notch (`default → medium → low → minimal`). This activates *only after* the model demonstrates it can't fit at the current effort. The benchmark does NOT a-priori set low reasoning effort.
-4. **Per-call `reasoning_effort_for_this_attempt` is logged** so you can audit which calls used reduced reasoning.
-
-### Diagnosing token-budget issues on a new provider
-
-The canary is in the run JSONLs:
-
-```
-1. Grep run JSONLs for "did not call submit_move".
-   Any hits = a likely token-budget interaction.
-2. Inspect the finish_reason in the error message.
-   - "length" → bump max_tokens (start at 65536)
-   - "MALFORMED_FUNCTION_CALL" → same; the stepdown ladder catches both
-   - "content_filter" → safety refusal (different problem)
-   - "stop" with no tool → model declined (likely tool_choice issue)
-3. The factory-level max_tokens default is the right place to verify your
-   configuration is being applied; individual adapter defaults are
-   overridden by the factory's argument.
-```
-
----
-
 ## Caveats and expectations
 
 **Caveats:**
@@ -255,6 +207,20 @@ What would tighten the findings:
 4. **Reasoning-trace inspection across retries.** Save every retry's full response (currently only the final). Measures whether the model genuinely updates between retries vs pattern-matching a different SAN.
 5. **Controlled reasoning-effort experiment.** Same positions × varying effort per call × paired cp_loss. Resolves the confound in the current reasoning-effort-vs-quality observation.
 6. **Other 2D-state substrates.** Build analogous benchmarks for grid-navigation, UI layout reasoning, or tile-based puzzles. Confirms the spatial-reasoning failure profile is universal across 2D-grounded tasks, not chess-specific.
+
+---
+
+## Notes on reasoning models
+
+A few provider-specific behaviors to keep in mind when running this benchmark on reasoning-tier models. These aren't findings — just things that affect how the harness interacts with the APIs.
+
+**`max_tokens` semantics differ by provider.** OpenAI's `max_completion_tokens` and Google's `max_output_tokens` cap reasoning + visible output combined. A reasoning model can spend its entire budget reasoning and have zero tokens left for the tool call, returning `finish_reason='length'`. Anthropic's `max_tokens` counts output only; thinking is on a separate budget. The benchmark defaults to 65536 for reasoning-capable providers (8192 for Anthropic, since the SDK refuses non-streaming calls above that). Set the ceiling lower at your own risk; audit run JSONLs for `did not call submit_move` entries to spot budget issues.
+
+**Gemini has a second tool-output failure: `MALFORMED_FUNCTION_CALL`.** When reasoning runs long enough to corrupt the structured output without quite hitting the length cap, Gemini reports this finish_reason instead. The harness's reasoning-effort fallback ladder triggers on both — when an attempt hits either failure mode, the next retry on that move drops effort one notch (`default → medium → low → minimal`). The fallback activates only after the model demonstrates it can't fit at the current effort.
+
+**Gemini Pro Preview has a 250-request-per-day cap** regardless of paid tier. Only GA models (e.g., `gemini-2.5-pro`) have unrestricted per-tier quotas. A Reliability + PlayQuality gauntlet on a reasoning-heavy model with retries can burn 300-400 requests, so the cap is binding. The benchmark uses `gemini-2.5-pro` for the published frontier-Google cell.
+
+**Per-call `reasoning_effort_for_this_attempt` is logged** in `progress.jsonl` so you can audit which calls used reduced reasoning vs the model's default.
 
 ---
 
