@@ -21,7 +21,7 @@ The numbers below quantify what the video shows.
 
 ## Headline
 
-**The strongest model in the matrix achieves ChessReliability 0.639 on a [0, 1] scale where Stockfish self-play is the 1.0 reference.** That's a budget non-reasoning model (Gemini 3.1 Flash Lite) playing legal-on-first-try ~88% of the time and reaching mid/endgame with mediocre move quality. Frontier reasoning models from Anthropic and DeepSeek score below it. The bottom of the matrix sits at 0.032 — models that forfeit before reaching mid-game.
+**The strongest model in the matrix achieves ChessReliability 0.639 on a [0, 1] scale where Stockfish self-play is the 1.0 reference.** That's a budget non-reasoning model (Gemini 3.1 Flash Lite) producing a legal move on the first attempt (zero retries) ~88% of the time and reaching mid/endgame with mediocre move quality. Frontier reasoning models from Anthropic and DeepSeek score below it. The bottom of the matrix sits at 0.032 — models that forfeit before reaching mid-game.
 
 GPT-5 has the **highest first-attempt-legal rate of any cell at 97.8%** but a lower composite score because the rare illegal-move cases burn more retry-cost recovery.
 
@@ -44,7 +44,7 @@ Two diagnostic columns alongside the composite scores make the matrix readable: 
 
 Eight cells: frontier and budget tier across four providers. Sorted by ChessReliability.
 
-| Provider | Tier | Model | Reliability | PlayQuality | first-try legal | avg retries/move |
+| Provider | Tier | Model | Reliability | PlayQuality | first-attempt legal | avg retries/move |
 |---|---|---|---|---|---|---|
 | Google | budget | `gemini-3.1-flash-lite` | **0.639** | 0.217 | 87.8% | 0.16 |
 | Google | frontier | `gemini-2.5-pro` | 0.527 | **0.274** | 93.8% | 0.07 |
@@ -71,11 +71,13 @@ For specifics on the Anthropic cells in particular, see [the Anthropic note belo
 
 ## Reading the matrix
 
-The first-try legal column and avg retries column are essential. Two models with identical Reliability scores can mean very different things — one might be picking legal moves on first try and being graded mainly on move quality; another might be needing two retries per move and being penalized for the cost of finding the legal move. The diagnostic columns separate these readings.
+The first-attempt legal column and avg retries column are essential. Two models with identical Reliability scores can mean very different things — one might be picking legal moves with zero retries and being graded mainly on move quality; another might be needing two retries per move and being penalized for the cost of finding the legal move. The diagnostic columns separate these readings.
+
+"First-attempt legal" means **zero retries used** — the model proposed a legal SAN on its very first attempt for that move, before any harness feedback. A model with 88% first-attempt legal is producing a legal move with no retry feedback on 88% of plies.
 
 The matrix sorts into three behavioral bands:
 
-**Band 1 — "Plays legal chess on first attempt":** Gemini cells, GPT-5, DeepSeek-reasoner. First-try legal rate 78-98%, avg retries 0.07-0.27 per move. The Reliability score is mostly about *move quality* on the legal moves played. The composite reflects what these models actually do at the board.
+**Band 1 — "Plays legal chess on first attempt":** Gemini cells, GPT-5, DeepSeek-reasoner. First-attempt legal rate 78-98%, avg retries 0.07-0.27 per move. The Reliability score is mostly about *move quality* on the legal moves played. The composite reflects what these models actually do at the board.
 
 **Band 2 — "Needs the retry safety net":** Claude Opus 4.7. First-try legal 63%, avg 0.79 retries per move. Roughly one move in three is illegal on first try; the harness feeds back errors before the model corrects. Even after recovery the `0.25^retries` cost ensures retried moves contribute little.
 
@@ -103,7 +105,7 @@ Anthropic's scores are the lowest among the four providers in the matrix. This d
 
 Quantitatively, three things compound for Anthropic:
 
-1. Anthropic's first-try-legal rate is lower than the matrix top (63% Opus vs 98% GPT-5). Each illegal-first-try move pays the `0.25^retries` cost.
+1. Anthropic's first-attempt-legal rate is lower than the matrix top (63% Opus vs 98% GPT-5). Each illegal-first-attempt move pays the `0.25^retries` cost.
 2. Anthropic's middlegame ACPL is the highest in the matrix at ~240 cp for Opus. Under exponential quality decay this scores ~0.20 per move vs Flash Lite's ~0.65 per move.
 3. Anthropic forfeits earlier than the matrix top — Opus reaches plies 1-30 in only some games, Haiku averages 11 plies per game. With high-weight plies (20+, 30+) contributing disproportionately to both numerator and denominator, models that forfeit early lose access to the score's largest contributions.
 
@@ -231,7 +233,7 @@ Consistency-only failures are the largest bucket. **The model picks correctly bu
 
 ## The bottom line
 
-The eval measures whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across many reasoning steps. The current matrix top is 0.639 — a budget non-reasoning model from Google playing legal-on-first-try ~88% of the time and reaching mid/endgame with mediocre move quality. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek either struggle on first-try legality (Anthropic) or score below the budget top on the composite anyway (OpenAI, DeepSeek). The bottom of the matrix is 0.032 — models that forfeit before reaching mid-game.
+The eval measures whether LLMs can maintain a 2D state of typed entities and correctly compute geometric queries against it across many reasoning steps. The current matrix top is 0.639 — a budget non-reasoning model from Google playing legal-on-first-try ~88% of the time and reaching mid/endgame with mediocre move quality. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek either struggle on first-attempt legality (Anthropic) or score below the budget top on the composite anyway (OpenAI, DeepSeek). The bottom of the matrix is 0.032 — models that forfeit before reaching mid-game.
 
 Chess gives a domain with deterministic ground truth, calibrated difficulty (memorized openings vs unique mid/endgames), and rules whose application is purely geometric. Models describe these rules verbally with 99% accuracy while applying them spatially at much lower rates. The benchmark exposes this gap with a small, cheap, reproducible test — a structural weakness shared by frontier and budget models alike on a generalizable cognitive dimension.
 

@@ -108,7 +108,7 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 **Reasonable expectations:**
 
 - LLMs on this benchmark span 0.03 to 0.64 on Reliability. The top is a budget non-reasoning model; the bottom is two budget models and one frontier model. Reasoning-tier optimization is neither necessary nor sufficient for high scores.
-- The first-try legal rate column is the most diagnostic single number — it reads independently of how forgiving the harness is. Read it alongside the composite.
+- The first-attempt legal rate column is the most diagnostic single number — it measures the fraction of plies where the model's very first proposal (zero retries) was legal. Reads independently of how forgiving the harness is. Read it alongside the composite.
 - Opening positions show **0% failure rate** for every model tested. Failures concentrate on positions outside training distribution.
 - The scoring is designed to be hill-climbable. Today's top (0.64) leaves real room above. Engine-level play would score 0.95+. The gap is the cognitive headroom.
 

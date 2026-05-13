@@ -95,7 +95,7 @@ def main() -> None:
     args = ap.parse_args()
 
     print(f"{'model':<35} | {'metric':<11} | {'score':>5} | {'max_retries':>11} | "
-          f"{'first_try_legal_rate':>20} | {'avg_retries_per_move':>20} | {'games':>5} | {'moves':>5}")
+          f"{'first_attempt_legal_rate':>20} | {'avg_retries_per_move':>20} | {'games':>5} | {'moves':>5}")
     print("-" * 134)
     for model in args.models:
         for kind_label, skill, max_plies, kind_key in [
