@@ -16,7 +16,11 @@ V1_MODELS = ["claude-opus-4-7", "claude-sonnet-4-6"]
 BENCHMARK_MATRIX: dict[str, dict[str, str]] = {
     "anthropic": {"frontier": "claude-opus-4-7",          "budget": "claude-haiku-4-5-20251001"},
     "openai":    {"frontier": "gpt-5",                    "budget": "gpt-5-mini"},
-    "google":    {"frontier": "gemini-3.1-pro-preview",   "budget": "gemini-3.1-flash-lite"},
+    # Google's frontier was originally gemini-3.1-pro-preview, but Google
+    # enforces a 250 req/day cap on preview-track models regardless of paid
+    # tier — too tight for CR+PS with retries. Use gemini-2.5-pro (GA, no
+    # daily cap) as the published frontier cell.
+    "google":    {"frontier": "gemini-2.5-pro",           "budget": "gemini-3.1-flash-lite"},
     "deepseek":  {"frontier": "deepseek-reasoner",        "budget": "deepseek-chat"},
 }
 
@@ -67,18 +71,25 @@ KNOWN_MODELS: dict[str, str] = {
 
 
 def provider_for_model(model_id: str) -> str:
-    """Resolve a model ID to its provider. Falls back to prefix matching."""
-    if model_id in KNOWN_MODELS:
-        return KNOWN_MODELS[model_id]
-    if model_id.startswith("claude-"):
+    """Resolve a model ID to its provider. Falls back to prefix matching.
+
+    The `-pytool` suffix is a routing flag (not part of the underlying model
+    ID) — the factory uses it to pick a python-tool-augmented adapter and
+    strips it before passing the name to the provider. Treat it transparently
+    here.
+    """
+    base = model_id[:-len("-pytool")] if model_id.endswith("-pytool") else model_id
+    if base in KNOWN_MODELS:
+        return KNOWN_MODELS[base]
+    if base.startswith("claude-"):
         return "anthropic"
-    if model_id.startswith(("gpt-", "o1-", "o3-")):
+    if base.startswith(("gpt-", "o1-", "o3-")):
         return "openai"
-    if model_id.startswith("gemini-"):
+    if base.startswith("gemini-"):
         return "google"
-    if model_id.startswith("meta-llama/") or "llama" in model_id.lower():
+    if base.startswith("meta-llama/") or "llama" in base.lower():
         return "together"
-    if model_id.startswith("deepseek"):
+    if base.startswith("deepseek"):
         return "deepseek"
     raise ValueError(
         f"Unknown model '{model_id}'. Add it to KNOWN_MODELS in config.py or use "

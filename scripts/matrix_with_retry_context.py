@@ -95,13 +95,13 @@ def main() -> None:
     args = ap.parse_args()
 
     print(f"{'model':<35} | {'kind':<3} | {'score':>5} | {'max_ret':>7} | "
-          f"{'1st-leg':>7} | {'mean_ret':>8} | {'games':>5} | {'plies':>5}")
-    print("-" * 110)
+          f"{'first_attempt_legal':>19} | {'mean_retries':>12} | {'games':>5} | {'plies':>5}")
+    print("-" * 122)
     for model in args.models:
         for kind, skill, max_plies in [("CR", 3, 40), ("PS", 5, 60)]:
             run = find_latest_run(model, skill)
             if not run:
-                print(f"{model:<35} | {kind:<3} | {'-':>5} | {'-':>7} | {'-':>7} | {'-':>8} | {'-':>5} | {'-':>5}  NO RUN")
+                print(f"{model:<35} | {kind:<3} | {'-':>5} | {'-':>7} | {'-':>19} | {'-':>12} | {'-':>5} | {'-':>5}  NO RUN")
                 continue
             try:
                 r = score_run(run, max_plies, kind)
@@ -111,7 +111,7 @@ def main() -> None:
             if r is None:
                 continue
             print(f"{model:<35} | {kind:<3} | {r['score']:.3f} | {r['max_retries']:>7} | "
-                  f"{r['first_attempt_legal_rate']:.3f}   | {r['mean_retries_per_move']:>8.2f} | "
+                  f"{r['first_attempt_legal_rate']:>19.3f} | {r['mean_retries_per_move']:>12.2f} | "
                   f"{r['n_games']:>5} | {r['n_plies']:>5}")
 
 
