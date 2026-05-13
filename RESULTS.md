@@ -79,6 +79,29 @@ The first-attempt legal column and avg retries column are essential. Two models 
 
 "First-attempt legal" means **zero retries used** — the model proposed a legal SAN on its very first attempt for that move, before any harness feedback. A model with 88% first-attempt legal is producing a legal move with no retry feedback on 88% of plies.
 
+### Avg retries/move can be misleading on its own — read it with first-attempt-legal
+
+The `avg retries/move` column is the total retries used across all plies divided by total plies. It compresses two qualitatively different failure profiles into one number. A counterintuitive example from the matrix:
+
+```
+Gemini 2.5 Pro:  first-attempt legal 93.8%   avg retries 0.07
+GPT-5:           first-attempt legal 97.8%   avg retries 0.15
+```
+
+GPT-5 fails *less often* (2.2% vs 6.2%) yet has *more retries on average* (0.15 vs 0.07). The retry distributions explain it:
+
+```
+Gemini 2.5 Pro:  11 plies needed retries → 10 took 1 retry, 1 took 2 retries
+                 → failures recover in 1-2 retries
+
+GPT-5:            3 plies needed retries → 1 took 1 retry, 2 took 10 retries (max)
+                 → failures burn the entire stepdown ladder
+```
+
+Two different patterns: **Gemini fails more often but recovers fast** (1 retry usually fixes it — a typical "wrong piece-type choice" the retry feedback corrects). **GPT-5 fails rarely but catastrophically** — when it fails it usually exhausts the full retry budget because the failure is reasoning-budget exhaustion (length errors that force the harness all the way down the `default → medium → low → minimal` effort ladder before a legal move emerges).
+
+The avg-retries column gives you the average cost; the first-attempt-legal column gives you the failure rate; the gap between them gives you the failure *depth*. Read all three together.
+
 The matrix sorts into three behavioral bands:
 
 **Band 1 — "Plays legal chess on first attempt":** Gemini cells, GPT-5, DeepSeek-reasoner. First-attempt legal rate 78-98%, avg retries 0.07-0.27 per move. The Reliability score is mostly about *move quality* on the legal moves played. The composite reflects what these models actually do at the board.
