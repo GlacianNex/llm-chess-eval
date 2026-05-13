@@ -1,44 +1,51 @@
-"""PlayStrength (PS) — move-quality metric across honest, completed playthroughs.
+"""PlayQuality (formerly PlayStrength) — move-strength metric across full games.
 
 Complement to ChessReliability:
-  - CR measures rule-following (forfeit mode). Catches illegal moves.
-  - PS measures move quality across a full game (retry mode at fixed skill).
-    Catches bad legal moves throughout the game, especially in mid/endgame
-    where the model's spatial state degrades.
-
-Run as retry mode so games progress to a natural conclusion (the model finds
-its own legal moves with feedback rather than Stockfish substituting them in).
+  - ChessReliability measures rule-following: can the model produce a legal
+    move on first attempt at a low Stockfish skill, with steep per-retry cost.
+  - PlayQuality measures move strength once a legal move is found. Stockfish
+    skill 5 (harder opponent), retry mode with max_retries=3 (no per-retry
+    cost). Captures mid/endgame move quality that ChessReliability's tighter
+    retry budget misses.
 
 Metric (per game, then averaged across games):
-    PS_game = (legal_moves_played / max_moves) × max(0, 1 − ACPL_capped / ACPL_CAP)
+    per_move_score = move_quality(cp_loss) × game_phase_weight(ply)
+    move_quality(cp_loss) = exp(-cp_loss / QUALITY_DECAY_CONSTANT)
+    game_phase_weight(ply) = 1 / 2 / 4 / 8 by ply bucket (geometric)
 
-    where ACPL_capped is the mean over move-level cp_loss values, each clamped to
-    ACPL_CAP first (so one mate-blunder doesn't dominate the average), and
-    legal_moves_played is the count of moves the model successfully made.
+    game_score = sum_over_legal_moves(per_move_score) / max_possible_weighted_score
 
-The soft-completion factor (plies/max_plies) gives partial credit for games that
-reach mid/endgame even if they eventually forfeit on exhausted retries. A full
-40-move game with ACPL 100 → PS ≈ 0.90; a 10-move forfeit at ACPL 50 → PS ≈ 0.24.
+PlayQuality does NOT include a retry cost multiplier — that's ChessReliability's
+job. Once a move is found legally, PlayQuality scores its strength independent
+of how many attempts it took. This is the conceptual split between the two
+metrics: Reliability is "can the model play legal chess on first attempt";
+PlayQuality is "given it found a legal move, how good was it."
 
-This formula is structurally identical to ChessReliability (CR), but PS is
-computed over RETRY-mode games at fixed Stockfish skill, so it captures
-mid/endgame move quality that CR (forfeit mode) misses.
+The denominator (max_possible_weighted_score = sum of phase weights for plies
+1..max_plies) is constant per max_plies. An early forfeit loses both the
+missing per-move scores AND the high-weight late plies that would have
+contributed disproportionately. This bakes the memorization-cliff thesis
+into the metric: surviving to ply 30 is worth more than playing ply 5 well.
+
+Default config:
+    - retry mode with max_retries = 3 (no per-retry cost)
+    - QUALITY_DECAY_CONSTANT = 150 (same as ChessReliability)
+    - Phase weights 1/2/4/8 at ply boundaries 10/20/30 (same as ChessReliability)
+    - Stockfish skill 5, max_plies 60
 
 Reported separately:
   - completion_rate_natural: fraction of games that ended with a real chess
     result (1-0/0-1/draw) rather than running out of retries
   - ACPL by phase (opening / middlegame / endgame)
-
-Phase breakdown reported separately:
-  - opening:    moves 1-15
-  - middlegame: moves 16-30
-  - endgame:    moves 31+
 """
 from __future__ import annotations
+
+import math
 
 from ..types import GameRecord
 
 ACPL_CAP = 1000  # 10 pawns of loss per move caps the penalty
+QUALITY_DECAY_CONSTANT = 150.0
 OPENING_END = 15
 MIDDLE_END = 30
 
@@ -49,6 +56,26 @@ def _phase_for_move(ply: int) -> str:
     if ply <= MIDDLE_END:
         return "middlegame"
     return "endgame"
+
+
+def _game_phase_weight(ply: int) -> float:
+    """Geometric phase weight; matches CR. Each phase doubles."""
+    if ply < 10:
+        return 1.0
+    if ply < 20:
+        return 2.0
+    if ply < 30:
+        return 4.0
+    return 8.0
+
+
+def _max_possible_weighted_score(max_plies: int) -> float:
+    return sum(_game_phase_weight(p) for p in range(1, max_plies + 1))
+
+
+def _move_quality_from_cp_loss(cp_loss: int) -> float:
+    """Exponential decay quality; matches CR."""
+    return math.exp(-max(0, cp_loss) / QUALITY_DECAY_CONSTANT)
 
 
 def compute_play_strength(games: list[GameRecord], max_plies: int = 60) -> dict:
@@ -78,6 +105,7 @@ def compute_play_strength(games: list[GameRecord], max_plies: int = 60) -> dict:
     per_game_quality: list[float] = []
     per_game_scores: list[float] = []
 
+    max_weighted_score = _max_possible_weighted_score(max_plies)
     for g in games:
         if g.result == "forfeit_illegal":
             forfeits += 1
@@ -100,10 +128,21 @@ def compute_play_strength(games: list[GameRecord], max_plies: int = 60) -> dict:
             cp_by_phase[_phase_for_move(m.ply)].append(min(m.cp_loss, ACPL_CAP))
 
         survival = min(len(legal_moves), max_plies) / max_plies
-        quality = max(0.0, 1.0 - game_acpl / ACPL_CAP)
+        # Diagnostic mean quality (exp decay), useful for the per-cell scorecard.
+        quality_mean = (
+            sum(_move_quality_from_cp_loss(m.cp_loss) for m in legal_moves) / len(legal_moves)
+        ) if legal_moves else 0.0
+        # Composite PS: weighted sum / max possible weighted. PS does NOT
+        # apply a retry cost multiplier (that's CR's job) — once a move is
+        # found, it's scored on its strength alone.
+        weighted_sum = sum(
+            _move_quality_from_cp_loss(m.cp_loss) * _game_phase_weight(m.ply)
+            for m in legal_moves
+        )
+        game_score = weighted_sum / max_weighted_score if max_weighted_score else 0.0
         per_game_survival.append(survival)
-        per_game_quality.append(quality)
-        per_game_scores.append(survival * quality)
+        per_game_quality.append(quality_mean)
+        per_game_scores.append(game_score)
 
     n = len(games)
     completion_rate_natural = completions / n

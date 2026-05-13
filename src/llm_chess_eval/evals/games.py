@@ -106,14 +106,19 @@ def _stepdown_for(length_failures: int) -> str | None:
     return _REASONING_STEPDOWN_LADDER[idx]
 
 
-def _quality_cp(cp_loss: int) -> float:
+def _live_print_move_quality(cp_loss: int) -> float:
+    """Linear quality used only for the live in-harness summary print.
+    Canonical scoring lives in chess_reliability.chess_reliability() and
+    play_strength.compute_play_strength()."""
     loss = max(0, cp_loss)
     if loss >= CP_LOSS_CAP:
         return 0.0
     return 1.0 - loss / CP_LOSS_CAP
 
 
-def _quality_retry(retries: int) -> float:
+def _live_print_retry_multiplier(retries: int) -> float:
+    """Linear-ish retry multiplier for the live in-harness summary print.
+    Canonical retry cost is 0.25^n in chess_reliability."""
     return 0.5 ** retries
 
 
@@ -415,10 +420,13 @@ def score_game(record: GameRecord) -> dict:
     legal_moves = [m for m in record.moves if m.chosen_legal]
     n = len(record.moves)
 
-    # per_move_quality blends cp_loss quality and retry penalty
+    # per_move_quality blends cp_loss quality and retry penalty — this is
+    # the LIVE-PRINT helper score (linear quality, 0.5^retries). Canonical
+    # scoring lives in chess_reliability/play_strength.
     if legal_moves:
         per_move_quality = sum(
-            _quality_cp(m.cp_loss) * _quality_retry(m.retries_used) for m in legal_moves
+            _live_print_move_quality(m.cp_loss) * _live_print_retry_multiplier(m.retries_used)
+            for m in legal_moves
         ) / len(legal_moves)
         per_move_consistency = sum(m.claim_consistency for m in legal_moves) / len(legal_moves)
         mean_cp_loss = sum(m.cp_loss for m in legal_moves) / len(legal_moves)

@@ -94,24 +94,27 @@ def main() -> None:
     ])
     args = ap.parse_args()
 
-    print(f"{'model':<35} | {'kind':<3} | {'score':>5} | {'max_ret':>7} | "
-          f"{'first_attempt_legal':>19} | {'mean_retries':>12} | {'games':>5} | {'plies':>5}")
-    print("-" * 122)
+    print(f"{'model':<35} | {'metric':<11} | {'score':>5} | {'max_retries':>11} | "
+          f"{'first_try_legal_rate':>20} | {'avg_retries_per_move':>20} | {'games':>5} | {'moves':>5}")
+    print("-" * 134)
     for model in args.models:
-        for kind, skill, max_plies in [("CR", 3, 40), ("PS", 5, 60)]:
+        for kind_label, skill, max_plies, kind_key in [
+            ("Reliability", 3, 40, "CR"),
+            ("PlayQuality", 5, 60, "PS"),
+        ]:
             run = find_latest_run(model, skill)
             if not run:
-                print(f"{model:<35} | {kind:<3} | {'-':>5} | {'-':>7} | {'-':>19} | {'-':>12} | {'-':>5} | {'-':>5}  NO RUN")
+                print(f"{model:<35} | {kind_label:<11} | {'-':>5} | {'-':>11} | {'-':>20} | {'-':>20} | {'-':>5} | {'-':>5}  NO RUN")
                 continue
             try:
-                r = score_run(run, max_plies, kind)
+                r = score_run(run, max_plies, kind_key)
             except Exception as e:
-                print(f"{model:<35} | {kind:<3} | ERR | {type(e).__name__}: {e!s:.60}")
+                print(f"{model:<35} | {kind_label:<11} | ERR | {type(e).__name__}: {e!s:.60}")
                 continue
             if r is None:
                 continue
-            print(f"{model:<35} | {kind:<3} | {r['score']:.3f} | {r['max_retries']:>7} | "
-                  f"{r['first_attempt_legal_rate']:>19.3f} | {r['mean_retries_per_move']:>12.2f} | "
+            print(f"{model:<35} | {kind_label:<11} | {r['score']:.3f} | {r['max_retries']:>11} | "
+                  f"{r['first_attempt_legal_rate']:>20.3f} | {r['mean_retries_per_move']:>20.2f} | "
                   f"{r['n_games']:>5} | {r['n_plies']:>5}")
 
 

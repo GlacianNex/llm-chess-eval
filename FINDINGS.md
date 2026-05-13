@@ -4,53 +4,73 @@ This is a short results-only digest. The full writeup with methodology, definiti
 
 ## Headline
 
-**No model achieves ≥90% legal-move rate on first attempt across the eight-cell cross-provider matrix.** The best is a budget non-reasoning model (Gemini 3.1 Flash Lite at 87.4%); the worst is a frontier reasoning model (GPT-5 at 2.4%). Every cell relies on the retry mechanism to complete games at all.
+**Across eight model-tier cells from four providers, the strongest model in the matrix achieves a ChessReliability score of 0.64 on a [0, 1] scale, with engine-quality self-play as the 1.0 reference.** The top score reflects a model that picks legal moves on first attempt ~88% of the time and reaches the endgame phase with playable, if mediocre, move quality. No model in the matrix exceeds that. The bottom of the matrix sits at 0.03 — models that forfeit on illegal moves before reaching mid-game.
 
-LLMs can describe chess rules accurately (99% correct on rule-claim questions) but cannot reliably apply them spatially on out-of-distribution positions. Frontier reasoning models score in the **0.03-0.70 range** on the headline ChessReliability metric. The 20× spread within the frontier tier — and the fact that the matrix is topped by Google's frontier and bottomed by OpenAI's frontier — means "reasoning tier" is not the relevant axis.
+The ranking does not track "reasoning tier" or "frontier vs budget". It tracks something more specific: whether the model can produce a legal SAN move on first attempt while staying alive long enough to reach the positions outside its training distribution.
 
-## What we measured
+## What we measure
 
-Two composite scores per model, both bounded `[0, 1]`:
+Two scores per model, both bounded `[0, 1]`:
 
-- **ChessReliability (CR)** — rule-following over full games vs Stockfish skill 3, with retries permitted but penalized geometrically (`0.25^n` per retry — 1 retry = 25% credit, 2 retries = 6%, 3 retries = 1.5%; max 10 retries before forfeit).
-- **PlayStrength (PS)** — move quality (centipawn loss) over honest playthroughs vs Stockfish skill 5 in retry mode (max 3 retries, no per-retry penalty).
+- **ChessReliability** — rule-following over full games. Stockfish skill 3 opponent, up to 10 retries per illegal move, with steep per-retry cost. Catches models that can't produce legal play on first attempt.
+- **PlayQuality** — move strength once a legal move is found. Stockfish skill 5 opponent (harder), max 3 retries, no per-retry cost. Catches models that play legal-but-bad moves.
 
-Both formulas multiply a survival factor (legal moves played / max moves) by a quality factor. Either factor near zero collapses the score.
+Per-move score is the product of three factors:
 
-Two diagnostic columns alongside the composite scores make the matrix readable: **first-attempt legal rate** (fraction of plies where the very first model proposal was legal) and **mean retries per move**. Together they let you tell whether a CR score reflects "model played legal chess and was graded on quality" or "model needed the retry safety net to recover."
+```
+per_move_score  =  move_quality(cp_loss)  ×  retry_cost(retries)  ×  game_phase_weight(ply)
+
+   move_quality(cp_loss)  =  exp(-cp_loss / 150)
+   retry_cost(retries)    =  0.25 ^ retries
+   game_phase_weight(ply) =  1 / 2 / 4 / 8  (doubles at ply 10, 20, 30)
+
+per_game_score  =  sum(per_move_score for legal moves)  /  max_possible_weighted_score
+```
+
+The exponential quality decay separates engine-level play from grandmaster from intermediate. The 0.25^retries cost makes the retry safety net expensive (one retry costs 75% of the move's value). The geometric phase weight encodes the memorization-cliff thesis directly: late-game plies (out of training distribution) are weighted 8× the openings.
+
+ChessReliability uses all three factors. PlayQuality uses move_quality × phase_weight only — once a legal move is found, PlayQuality scores its strength independent of how many retries it took.
 
 ## The matrix
 
-Eight cells: frontier and budget tier across four providers. Standardized config (see HANDOFF.md §"How to reproduce"). Sorted by CR.
+Eight cells: frontier and budget tier across four providers. Sorted by ChessReliability.
 
-| Provider | Tier | Model | CR | PS | 1st-attempt legal (CR) | mean retries/move (CR) |
+| Provider | Tier | Model | Reliability | PlayQuality | first-try legal | avg retries/move |
 |---|---|---|---|---|---|---|
-| Google | frontier | `gemini-2.5-pro` | **0.705** | 0.285 | 82.8% | 0.32 |
-| Google | budget | `gemini-3.1-flash-lite` | 0.619 | **0.664** | **87.4%** | 0.31 |
-| DeepSeek | frontier | `deepseek-reasoner` | 0.459 | 0.351 | 78.7% | 0.22 |
-| Anthropic | frontier | `claude-opus-4-7` | 0.395 | 0.188 | 68.9% | 0.75 |
-| Anthropic | budget | `claude-haiku-4-5-20251001` | 0.187 | 0.067 | 54.3% | 1.29 |
-| DeepSeek | budget | `deepseek-chat` | 0.142 | 0.052 | 40.9% | 2.14 |
-| OpenAI | budget | `gpt-5-mini` | 0.099 | 0.055 | 18.3% | 2.38 |
-| OpenAI | frontier | `gpt-5` | 0.033 | 0.015 | **2.4%** | 3.40 |
+| Google | budget | `gemini-3.1-flash-lite` | **0.639** | 0.217 | 87.8% | 0.16 |
+| Google | frontier | `gemini-2.5-pro` | 0.527 | **0.274** | 93.8% | 0.07 |
+| OpenAI | frontier | `gpt-5` | 0.410 | _re-running_ | **97.8%** | 0.15 |
+| DeepSeek | frontier | `deepseek-reasoner` | 0.373 | 0.086 | 78.3% | 0.27 |
+| Anthropic | frontier | `claude-opus-4-7` | 0.164 | 0.068 | 63.1% | 0.79 |
+| DeepSeek | budget | `deepseek-chat` | 0.040 | 0.017 | 38.3% | 2.65 |
+| Anthropic | budget | `claude-haiku-4-5-20251001` | 0.032 | 0.014 | 53.7% | 1.74 |
+| OpenAI | budget | `gpt-5-mini` | _re-running_ | _re-running_ | _re-running_ | _re-running_ |
 
-`gemini-3.1-pro-preview` is on a 250-req/day cap (preview-model policy applies even on paid tier), substituted with `gemini-2.5-pro` for the frontier-Google cell.
+`gemini-3.1-pro-preview` is on a 250 req/day cap (Google's preview-track policy applies regardless of paid tier) — too tight for the gauntlet. We use the GA `gemini-2.5-pro` for the published frontier-Google cell.
 
-## Four findings from the clean data
+## Four findings from the data
 
-**1. No model plays legal chess reliably on first attempt.** The best in the matrix is 87.4% first-attempt-legal — meaning ~13% of moves were illegal on first try and required the harness to feed back errors. Frontier reasoning models from OpenAI, Anthropic, and DeepSeek score 2.4%, 68.9%, and 78.7% on this dimension respectively. The retry-penalty mechanism in CR is what lets these models score above zero; in a real game (no retries permitted) every model in the matrix would forfeit early.
+**1. The top of the matrix is a budget non-reasoning model.** Gemini 3.1 Flash Lite leads ChessReliability at 0.639 by being almost-always-legal on first try (87.8%) and staying alive into mid/endgame. Frontier reasoning models from Anthropic and DeepSeek score below it. Reasoning-tier optimization is neither necessary (Flash Lite has no extended thinking) nor sufficient (frontier OpenAI and Anthropic both score below it).
 
-**2. Reasoning-tier supremacy doesn't hold for this task.** Across the four frontier reasoning models, CR ranges from 0.033 to 0.705 — a 20× spread. The top of the matrix is a frontier reasoning model (Gemini 2.5 Pro); the bottom is also a frontier reasoning model (GPT-5). The strongest budget non-reasoning model (Flash Lite) outscores three of the four frontier reasoning models on CR and all of them on PS. Reasoning-tier optimization helps when reasoning fits in the response budget; OpenAI's specifically does not on this benchmark.
+**2. GPT-5 has the highest first-try legal rate in the matrix at 97.8%** — better than Flash Lite (87.8%) or Gemini 2.5 Pro (93.8%). It's also the only model that nearly never proposes an illegal first move. Its overall Reliability score (0.410) reflects something different: when the rare illegal move does happen, GPT-5's stepdown ladder needs more retries than other models to recover, which compounds the cost. **PlayQuality re-run pending after a token-budget configuration bug fix** — the prior published number was unreliable; new measurement is in flight.
 
-**3. The memorization cliff is universal.** Every model that reaches mid-game shows the ACPL gradient: 25-130 cp opening → 55-241 cp middlegame → 8-66 cp endgame (where reached). Opening positions are essentially perfect for every model; quality degrades sharply on out-of-distribution positions. Every standard opening position in our 20-position bank shows a 0% failure rate across every model tested. Mid-game and synthetic endgame positions show 33-67% failure rates on the harder examples.
+**3. The memorization cliff is universal and built into the score.** Every model that reaches mid-game shows the ACPL gradient: 25-130 cp opening → 55-241 cp middlegame → 50-130 cp endgame. Standard opening positions in our 20-position bank show 0% failure rate across every model tested. Mid-game and synthetic endgame positions show 33-67% failure rates on the hardest examples. The geometric phase weight (1/2/4/8 by ply bucket) means models that fail to reach endgame score very low — surviving long is half the score by construction.
 
-**4. Models form persistent wrong beliefs.** The most striking single qualitative finding: models don't make random illegal moves. They form coherent-but-wrong mental models of a position and commit to them across multiple stateless API calls. Examples from the data:
+**4. Models form persistent wrong beliefs.** The most striking single qualitative finding: models don't make random illegal moves. They form coherent-but-wrong mental models of a position and commit to them across multiple stateless API calls. Examples from the game logs:
 
-- Opus proposed the same illegal king-capture `Kxg4` **five times** across 11 plies in one game, with progressive but consistent rationales. Each call is independent, but the same FEN deterministically prompts the same wrong pattern-match.
-- Sonnet proposed `d7` three times to advance a pawn that does not exist in the position.
-- In retry mode, when feedback tells the model "your last move was illegal," 17/22 retries iterated to a different piece type — but forfeits clustered on plies where ALL retry attempts shared the same structural mistake (e.g., none of 4 retries addressed an existing check).
+- Claude Opus proposed the same illegal king-capture `Kxg4` **five times** across 11 plies in one game, each time with a different but consistent rationale. Each call is independent, but the same FEN deterministically reproduces the same wrong pattern-match.
+- Claude Sonnet proposed `d7` three times to advance a pawn that does not exist on the board.
+- In retry mode, when feedback tells the model "your last move was illegal," 17 of 22 retries iterated to a different piece — but forfeits clustered on plies where ALL retry attempts shared the same structural mistake (e.g., none addressed an existing check because none of the retries perceived the check).
 
-This is qualitatively different from typical "LLM hallucinations." A standard hallucination is a one-shot plausible-sounding wrong fact. The pattern here is convergence on the same wrong belief across many independent invocations — the wrong belief is encoded in the model's deterministic response to a specific input.
+This is qualitatively different from typical "LLM hallucinations." A standard hallucination is a one-shot plausible-sounding wrong fact. The pattern here is convergence on the same wrong belief across many independent invocations — the belief is the model's deterministic response to a specific input, not a random error.
+
+## Note on the Anthropic scores
+
+Anthropic models score lowest in the matrix. This is **not** an artifact of the methodology — Anthropic was the only provider unaffected by the response-token-budget configuration issue that bit other providers (their `max_tokens` parameter counts output tokens only, with thinking on a separate budget). The Anthropic numbers reflect genuine model behavior.
+
+What the matrix exposes is that **Anthropic's reasoning models struggle specifically with sustained 2D spatial state-tracking** — the cognitive failure mode this benchmark was designed to isolate. Anthropic excels on benchmarks that reward strong single-shot reasoning over textual or symbolic state (MMLU, GPQA, coding). It underperforms here because the benchmark is biased toward the dimension where Anthropic is comparatively weakest. The same models that fail to reach the endgame in chess routinely solve graduate-level math and write production code — chess-style spatial reasoning is a specific weakness, not a general one.
+
+The matrix is not a ranking of "best AI." It's a ranking on one cognitive dimension. Anthropic is at the bottom of *this* dimension; other dimensions order the providers very differently.
 
 ## Failure mode breakdown
 
@@ -58,8 +78,8 @@ Across 224 illegal moves classified, **~95% are spatial-reasoning failures**: li
 
 ## What this implies
 
-The benchmark exposes a structural weakness that survives training improvements and scale. Models can describe chess rules verbally with high accuracy while applying them spatially at much lower rates. Chess is a clean test of this dimension; the same failure profile should appear in any domain requiring sustained reasoning over structured 2D state (UI layouts, robotics simulations, multi-step refactoring on unfamiliar codebases, physical reasoning, map navigation).
+The benchmark exposes a structural weakness that survives training improvements and scale. Models can describe chess rules verbally with high accuracy while applying them spatially at much lower rates. The same failure profile should appear in any domain requiring sustained reasoning over structured 2D state — UI layouts, robotics simulations, multi-step refactoring on unfamiliar codebases, physical reasoning, map navigation.
 
-The retry-context columns matter for interpreting the score: a model with high CR achieved by mostly playing legal moves is doing something qualitatively different from a model with the same CR achieved through the retry safety net. The 0.25^n penalty is steep enough that retry-dependent models cluster near zero, surfacing the difference.
+The scoring is designed to be *hill-climbable*: the top of the current matrix (0.64) leaves real room above. A model that reaches engine-level play across all phases would score near 0.95+. Today's gap between "best in matrix" and "what a strong chess engine does" is substantial — there is significant cognitive headroom to grow into.
 
-**See [HANDOFF.md](HANDOFF.md) for full methodology, calculations, design rationale, reproduction recipe, and the cross-family interpretation.**
+**See [HANDOFF.md](HANDOFF.md) for full methodology, definitions, calculations, design rationale, reproduction recipe, and deep dives.**

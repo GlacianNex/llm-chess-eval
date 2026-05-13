@@ -135,7 +135,7 @@ def cmd_reliability(games_jsonl: tuple[Path, ...], model: str | None, n_games: i
             click.echo(f"  survival_component:  {result['survival_component_mean']:.3f}  "
                        f"(mean {result['mean_plies_legal']:.1f}/{max_plies} plies)")
             click.echo(f"  quality_component:   {result['quality_component_mean']:.3f}")
-            click.echo(f"  retry_penalty_mean:  {result['retry_penalty_mean']:.3f}  "
+            click.echo(f"  retry_cost_mean:     {result['retry_cost_mean']:.3f}  "
                        f"(mean {result['mean_retries_per_move']:.2f} retries/move)")
             click.echo(f"  completion_rate:     {result['completion_rate']:.2f}")
             click.echo(f"  per-game: {[f'{s:.3f}' for s in result['per_game_scores']]}")
