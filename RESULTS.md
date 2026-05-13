@@ -49,13 +49,23 @@ Eight cells: frontier and budget tier across four providers. Sorted by ChessReli
 | Google | budget | `gemini-3.1-flash-lite` | **0.639** | 0.217 | 87.8% | 0.16 |
 | Google | frontier | `gemini-2.5-pro` | 0.527 | **0.274** | 93.8% | 0.07 |
 | OpenAI | frontier | `gpt-5` | 0.410 | _re-running_ | **97.8%** | 0.15 |
-| DeepSeek | frontier | `deepseek-reasoner` | 0.373 | 0.086 | 78.3% | 0.27 |
-| Anthropic | frontier | `claude-opus-4-7` | 0.164 | 0.068 | 63.1% | 0.79 |
-| DeepSeek | budget | `deepseek-chat` | 0.040 | 0.017 | 38.3% | 2.65 |
-| Anthropic | budget | `claude-haiku-4-5-20251001` | 0.032 | 0.014 | 53.7% | 1.74 |
+| DeepSeek | frontier | `deepseek-reasoner` | 0.373 | 0.086 *<sup>a</sup>* | 78.3% | 0.27 |
+| Anthropic | frontier | `claude-opus-4-7` | 0.164 | 0.068 *<sup>a</sup>* | 63.1% | 0.79 |
+| DeepSeek | budget | `deepseek-chat` | 0.040 *<sup>b</sup>* | 0.017 *<sup>b</sup>* | 38.3% | 2.65 |
+| Anthropic | budget | `claude-haiku-4-5-20251001` | 0.032 *<sup>b</sup>* | 0.014 *<sup>b</sup>* | 53.7% | 1.74 |
 | OpenAI | budget | `gpt-5-mini` | _re-running_ | _re-running_ | _re-running_ | _re-running_ |
 
 `gemini-3.1-pro-preview` is on a 250 req/day cap (Google's preview-track policy applies regardless of paid tier) — too tight for a full gauntlet with retries. We use the GA `gemini-2.5-pro` for the published frontier-Google cell.
+
+### Why some scores are extremely low
+
+The geometric phase weight (`1 / 2 / 4 / 8` at ply boundaries 10 / 20 / 30) means roughly half of the achievable score lives in plies 20+. A model that forfeits before reaching mid-game loses access to that half in both the numerator AND has it weighing against them in the denominator. Combined with the `0.25^retries` cost and the exponential quality decay, scores below 0.10 are the natural floor for models that can't survive long.
+
+***<sup>a</sup>*** **`0.068`–`0.086` (Opus PlayQuality, DeepSeek-reasoner PlayQuality)**: model produces legal moves on most first attempts (63–78%) and plays moves of reasonable quality (cp_loss 80–240 on the plies it reaches), but the games rarely survive into endgame at Stockfish skill 5. With only 3 retries permitted in PlayQuality mode (vs Reliability's 10), even occasional length-failures and run-of-bad-positions cause early forfeits. Result: the high-weight late plies are mostly missing from the numerator while still counting toward the denominator.
+
+***<sup>b</sup>*** **`0.014`–`0.040` (Haiku, DeepSeek-chat — both metrics)**: first-attempt-legal rate of 38–54% means roughly half of all moves are illegal on the first try. Each of those moves pays the `0.25^retries` cost (1 retry → 25% credit, 2 retries → 6%). Combined with games averaging only 10–20 plies before forfeiting on illegal moves they can't recover from, the score is dominated by missing late-game plies and retry-cost-eroded mid-game plies. This isn't a metric pathology — it's the metric correctly reflecting "model cannot reliably play legal chess past the opening, even with the retry safety net."
+
+For specifics on the Anthropic cells in particular, see [the Anthropic note below](#a-note-on-the-anthropic-scores).
 
 ---
 
