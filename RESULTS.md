@@ -4,18 +4,9 @@ What we found running the benchmark across eight model-tier cells from four prov
 
 ---
 
-## What this benchmark does NOT measure
+## Scope
 
-Before the findings, the scope. This benchmark isolates **one** cognitive dimension: whether a model can maintain a coherent picture of an 8×8 board with typed pieces and correctly apply geometric rules (line-of-sight, paths, attack sets, adjacency) across many turns. That's it.
-
-What it does *not* measure:
-
-- **General intelligence or model quality.** A model that scores low here can score high on verbal reasoning, math, coding, instruction-following, or any other public benchmark. Anthropic models score lowest in this matrix; the same models routinely top SWE-Bench, GPQA, and MATH leaderboards. Chess-style spatial reasoning is one weakness, not a global one.
-- **Chess strength.** A model that's bad at chess but rule-consistent would score well here. The metrics reward rule-following and state coherence, not opening theory or tactical depth. ELO is incidental.
-- **Performance against engines.** Both metrics use amateur-tier Stockfish opponents (~1500–1700 ELO). The 1.0 calibration anchor is engine-quality moves as a scoring ceiling, *not* the opponent the benchmark plays against.
-- **Agentic capability in real environments.** Chess is a clean substrate for isolating one failure mode. Whether the same failure mode survives tool use, retrieval, or longer context is a separate question the benchmark doesn't directly address.
-
-The matrix below ranks models on this one dimension. Read it as "ranking on the chess-substrate spatial-reasoning dimension," not as "ranking of best AI."
+This benchmark isolates one cognitive dimension: whether a model can maintain coherent state of an 8×8 board with typed pieces and correctly apply geometric rules across many turns. The matrix below ranks models on that dimension. A model's score here doesn't predict its score on other benchmarks — chess-style spatial reasoning is one capability among many, and ranking on this dimension is not a ranking of model quality overall.
 
 ---
 
