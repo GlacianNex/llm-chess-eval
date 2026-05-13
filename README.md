@@ -11,8 +11,10 @@ A reproducible benchmark that measures whether LLMs can maintain coherent state 
 
 Two composite scores per model, both bounded in `[0, 1]`:
 
-- **ChessReliability** — rule-following over full games vs Stockfish skill 3, with up to 10 retries per illegal move at steep per-retry cost. Catches models that can't produce legal play on first attempt.
-- **PlayQuality** — move strength once a legal move is found, played against a harder Stockfish opponent. Catches models that play legal-but-bad moves.
+- **ChessReliability** — rule-following over full games vs Stockfish skill 3 (~1500 ELO, intermediate amateur), with up to 10 retries per illegal move at steep per-retry cost. Catches models that can't produce legal play on first attempt.
+- **PlayQuality** — move strength once a legal move is found, against Stockfish skill 5 (~1700 ELO, strong amateur). Catches models that play legal-but-bad moves.
+
+Both metrics use amateur-tier Stockfish opponents — this is not a model-vs-engine comparison. The 1.0 reference on the [0, 1] scale is Stockfish self-play as a scoring anchor, not the opponent the benchmark plays against.
 
 Per-move score multiplies three factors: exponential decay over centipawn loss vs Stockfish's best, a `0.25^retries` cost on retries, and a geometric phase weight (1 / 2 / 4 / 8 at ply boundaries 10 / 20 / 30) that makes late-game plies dominate the score. The geometric phase weight bakes the memorization-cliff thesis directly into the metric.
 

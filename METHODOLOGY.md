@@ -27,7 +27,9 @@ Two scores per model, both bounded `[0, 1]`:
 
 ### ChessReliability
 
-The model plays games vs Stockfish at skill 3. On an illegal proposed move, the model is told "that was illegal" and asked to try again — up to 10 retries per move. If all retries fail, the game forfeits.
+The model plays games vs Stockfish at skill 3 — approximately **1500 ELO, an intermediate amateur**. On an illegal proposed move, the model is told "that was illegal" and asked to try again — up to 10 retries per move. If all retries fail, the game forfeits.
+
+The opponent is amateur-tier deliberately. Reliability measures rule-following, not chess strength against engines — a stronger opponent would just force the model into harder positions faster without telling us anything new about whether it can keep its mental picture of the board accurate.
 
 Per-move score is a product of three factors:
 
@@ -55,7 +57,9 @@ ChessReliability = mean of per_game_score across N games. Standard config: N = 5
 
 ### PlayQuality
 
-The model plays games vs Stockfish at skill 5 (harder opponent) in retry mode with max 3 retries per move, no per-retry penalty. PlayQuality measures **how strong the move is once a legal move is found** — it doesn't penalize retry use.
+The model plays games vs Stockfish at skill 5 — approximately **1700 ELO, a strong amateur**. This is deliberate: the benchmark is not comparing LLMs to a chess engine. Stockfish at skill 5 plays at roughly the level of a competent club player, the kind of opponent that creates real but tractable positions an LLM with genuine chess understanding should be able to navigate. PlayQuality scores are *not* "performance vs engine" — they're "move quality across full games when the opponent is amateur-tier." Retry mode max 3 retries, no per-retry penalty. PlayQuality measures **how strong the model's moves are once it has found a legal one** — it doesn't penalize retry use.
+
+(For context on the full Stockfish skill range: skill 0 ≈ 1100 ELO beginner; skill 3 ≈ 1500 amateur — what Reliability uses; skill 5 ≈ 1700 strong amateur — what PlayQuality uses; skill 15 ≈ 2500 strong engine; skill 20 ≈ 2850 top engine. None of the current benchmark cells play against an engine-strength opponent.)
 
 Per-move score:
 
@@ -100,12 +104,14 @@ The 0.41 composite is the product of "near-perfect legality × mid-range quality
 
 | Score | Equivalent |
 |---|---|
-| 1.000 | Stockfish playing itself (engine-quality moves, full survival) |
-| 0.85-0.95 | Strong chess engine play across full games |
-| 0.55-0.75 | Best current LLMs on this benchmark |
+| 1.000 | Theoretical max — engine-quality moves across all 40 plies, zero retries |
+| 0.85-0.95 | Hypothetical: a model playing at engine-equivalent move quality |
+| 0.55-0.75 | Best current LLMs on this benchmark (vs amateur-tier Stockfish opponent) |
 | 0.30-0.50 | LLMs that survive into mid-game but with mediocre quality |
 | 0.10-0.20 | LLMs that struggle past opening |
 | 0.00-0.05 | Forfeit before mid-game, or heavy retry dependence |
+
+The 1.0 reference is the theoretical maximum of the metric (engine-quality moves with no retries needed across a full game) — *not* a benchmark cell. The benchmark plays models against amateur-tier opponents (skill 3 / skill 5); the engine-quality calibration is the scoring anchor, not a comparison target.
 
 Current matrix range: **0.032 (Claude Haiku) to 0.639 (Gemini 3.1 Flash Lite)**. See [RESULTS.md](RESULTS.md) for the full matrix.
 
