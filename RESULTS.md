@@ -16,45 +16,65 @@ The matrix below ranks models on this primitive. A model's score here doesn't pr
 
 ## The matrix
 
-Nine cells: frontier and budget tier across four providers, plus Sonnet as Anthropic mid-tier. Sorted by ChessReliability.
+Nine cells: frontier and budget tier across four providers, plus Sonnet as Anthropic mid-tier. Each cell ran 20+ Reliability games and 10+ PlayQuality games (most ran much more — see N column). Sorted by ChessReliability.
 
-| Provider | Tier | Model | Reliability | PlayQuality | first-attempt legal | avg retries/move |
-|---|---|---|---|---|---|---|
-| Google | budget | `gemini-3.1-flash-lite` | **0.639** | **0.320** | 87.8% | 0.16 |
-| Google | frontier | `gemini-2.5-pro` | 0.527 | 0.274 | 93.8% | 0.07 |
-| OpenAI | frontier | `gpt-5` | 0.410 [*ᶜ*](#footnote-c) | 0.200 | **97.8%** | 0.15 [*ᵈ*](#footnote-d) |
-| DeepSeek | frontier | `deepseek-reasoner` | 0.373 | 0.086 [*ᵃ*](#footnote-a) | 78.3% | 0.27 |
-| OpenAI | budget | `gpt-5-mini` | 0.301 | 0.079 | 90.2% | 0.11 |
-| Anthropic | frontier | `claude-opus-4-7` | 0.164 | 0.068 [*ᵃ*](#footnote-a) | 63.1% | 0.79 |
-| Anthropic | mid | `claude-sonnet-4-6` | 0.122 | 0.020 | 66.1% | 0.77 |
-| DeepSeek | budget | `deepseek-chat` | 0.040 [*ᵇ*](#footnote-b) | 0.017 [*ᵇ*](#footnote-b) | 38.3% | 2.65 |
-| Anthropic | budget | `claude-haiku-4-5-20251001` | 0.032 [*ᵇ*](#footnote-b) | 0.014 [*ᵇ*](#footnote-b) | 53.7% | 1.74 |
+| Provider | Tier | Model | Reliability | PlayQuality | first-legal | avg retries | forfeit rate | N (CR/PS) |
+|---|---|---|---|---|---|---|---|---|
+| Google | frontier | `gemini-2.5-pro` | **0.485** | 0.192 | 93.2% | 0.10 | 0% | 160/88 |
+| Google | budget | `gemini-3.1-flash-lite` | 0.477 | **0.466** | 86.5% | 0.20 | 5% | 160/80 |
+| OpenAI | frontier | `gpt-5` | 0.301 [*ᶜ*](#footnote-c) | 0.237 | **99.8%** | **0.00** | **0%** | 166/49 |
+| DeepSeek | frontier | `deepseek-reasoner` | 0.288 | 0.204 | 79.4% | 0.25 | 0% | 112/57 |
+| Anthropic | frontier | `claude-opus-4-7` | 0.281 [*ᵃ*](#footnote-a) | 0.144 | 71.3% | 0.60 | 30% | 160/80 |
+| OpenAI | budget | `gpt-5-mini` | 0.279 | 0.149 | 88.0% | 0.13 | 0% | 72/14 |
+| Anthropic | mid | `claude-sonnet-4-6` | 0.149 | 0.086 | 63.3% | 0.69 | 20% | 142/53 |
+| DeepSeek | budget | `deepseek-chat` | 0.097 [*ᵇ*](#footnote-b) | 0.046 [*ᵇ*](#footnote-b) | 33.9% | 2.29 | 80% | 172/80 |
+| Anthropic | budget | `claude-haiku-4-5-20251001` | 0.074 [*ᵇ*](#footnote-b) | 0.053 [*ᵇ*](#footnote-b) | 42.9% | 1.95 | 95% | 176/80 |
 
-Two scores per model, both bounded `[0, 1]`. **ChessReliability** measures rule-following over full games vs Stockfish skill 3 (~1500 ELO amateur) with up to 10 retries per illegal move at steep per-retry cost. **PlayQuality** measures move strength once a legal move is found, played against Stockfish skill 5 (~1700 ELO amateur). The 1.0 reference is Stockfish self-play. Diagnostic columns: **first-attempt legal** = fraction of plies where the very first model proposal was legal (zero retries); **avg retries/move** = total retries across all plies divided by total plies. Full formulas in [METHODOLOGY.md](METHODOLOGY.md).
+Two scores per model, both bounded `[0, 1]`. **ChessReliability** measures rule-following over full games vs Stockfish skill 3 (~1500 ELO amateur) with up to 10 retries per illegal move at steep per-retry cost. **PlayQuality** measures move strength once a legal move is found, played against Stockfish skill 5 (~1700 ELO amateur). Stockfish self-play would score 1.0; the published top is 0.485. Diagnostic columns: **first-legal** = fraction of plies where the model's first proposal was legal (zero retries); **avg retries** = total retries across all plies divided by total plies; **forfeit rate** = fraction of games that ended because the model couldn't produce a legal move within 10 retries. Full formulas in [METHODOLOGY.md](METHODOLOGY.md).
 
 ### Reading the matrix
 
-The first-attempt legal column and avg retries column are essential. Two models with identical Reliability scores can mean very different things — one might be picking legal moves with zero retries and being graded mainly on move quality; another might be needing retries each move and being penalized for the cost. The matrix sorts into three behavioral bands:
+The first-legal, avg-retries, and forfeit-rate columns split the matrix into three clean behavioral bands:
 
-**Band 1 — "Plays legal chess on first attempt":** Gemini cells, GPT-5, GPT-5-mini, DeepSeek-reasoner. First-attempt legal rate 78-98%, avg retries 0.07-0.27 per move. The Reliability score here is mostly about *move quality* on the legal moves played.
+**Band 1 — "Plays legal chess on first attempt":** GPT-5, Gemini Pro, GPT-5-mini, Flash Lite, DeepSeek-reasoner. First-legal 79–100%, avg retries 0.00–0.25, **0–5% forfeit rate**. The Reliability score here is mostly about *move quality* on the moves played — these models don't need the retry safety net.
 
-**Band 2 — "Needs the retry safety net":** Claude Opus, Claude Sonnet. First-attempt legal 63-66%, avg 0.77-0.79 retries per move. Roughly one move in three is illegal on first try; the harness feeds back errors before the model corrects. Even after recovery the `0.25^retries` cost ensures retried moves contribute little.
+**Band 2 — "Needs the retry safety net":** Claude Opus, Claude Sonnet. First-legal 63–71%, avg 0.60–0.69 retries per move, **20–30% forfeit rate**. Roughly one move in three is illegal on first try; the harness feeds back errors before the model corrects. Even after recovery the `0.25^retries` cost ensures retried moves contribute little to the composite. Some games never recover.
 
-**Band 3 — "Struggles to even propose legal moves":** Claude Haiku, DeepSeek-chat. First-attempt legal 38-54%, avg 1.7-2.7 retries per move. About half of all moves are illegal on first try, and the games rarely survive long enough to reach the high-weight late plies.
+**Band 3 — "Struggles to even propose legal moves":** Claude Haiku, DeepSeek-chat. First-legal 34–43%, avg 1.95–2.29 retries per move, **80–95% forfeit rate**. About half of all moves are illegal on first try, and the games almost never survive to completion. Haiku forfeited 168 of 176 games (95%); DeepSeek-chat forfeited 137 of 172 (80%).
 
-The full footnote explanations of [*ᵃ*](#footnote-a) [*ᵇ*](#footnote-b) [*ᶜ*](#footnote-c) [*ᵈ*](#footnote-d) are in [Footnotes on the matrix](#footnotes-on-the-matrix) below.
+**Forfeit rate is the cleanest single diagnostic.** GPT-5 played 100% of games to completion; Haiku finished 5%. That gap reflects "can the model keep producing legal moves end-to-end" more directly than any composite score.
+
+The full footnote explanations of [*ᵃ*](#footnote-a) [*ᵇ*](#footnote-b) [*ᶜ*](#footnote-c) are in [Footnotes on the matrix](#footnotes-on-the-matrix) below.
+
+### Methodology robustness — τ sensitivity
+
+The `move_quality` decay constant is τ=150. We re-scored the matrix at τ ∈ {100, 200, 300}. **Rankings are identical** across the τ range; absolute scores shift ~20%:
+
+| Model | τ=100 | τ=150 (published) | τ=200 | τ=300 |
+|---|---|---|---|---|
+| `gemini-2.5-pro` | 0.443 | 0.485 | 0.512 | 0.545 |
+| `gemini-3.1-flash-lite` | 0.434 | 0.477 | 0.504 | 0.537 |
+| `gpt-5` | 0.275 | 0.301 | 0.318 | 0.339 |
+| `deepseek-reasoner` | 0.262 | 0.288 | 0.305 | 0.326 |
+| `claude-opus-4-7` | 0.254 | 0.281 | 0.299 | 0.322 |
+| `gpt-5-mini` | 0.254 | 0.279 | 0.296 | 0.316 |
+| `claude-sonnet-4-6` | 0.133 | 0.149 | 0.160 | 0.174 |
+| `deepseek-chat` | 0.088 | 0.097 | 0.102 | 0.108 |
+| `claude-haiku-4-5-20251001` | 0.067 | 0.074 | 0.078 | 0.084 |
+
+The choice of τ=150 isn't load-bearing on any conclusion — pick τ=100 or τ=300, the relative ordering is invariant.
 
 ---
 
 ## A note on the Anthropic scores
 
-Anthropic's scores are the lowest among the four providers in the matrix. This deserves explanation because the picture is easy to misread.
+Anthropic's scores are the lowest among the four providers on Reliability and PlayQuality, except for Opus which is now competitive with mid-pack OpenAI/DeepSeek frontier cells. This deserves explanation because the picture is easy to misread.
 
-**Anthropic's numbers are not artifacts of methodology.** Anthropic was the only provider whose API responses were unaffected by the response-token-budget configuration issue that affected the other providers (see [METHODOLOGY.md](METHODOLOGY.md#methodology-constraints-encountered)). Anthropic's `max_tokens` parameter counts *output tokens only*, with extended thinking on a separate budget. The numbers shown here reflect genuine model behavior at full reasoning budgets.
+**Anthropic's numbers are not artifacts of methodology.** During the benchmark build, OpenAI's `max_completion_tokens` and Google's `max_output_tokens` were initially set too low (2048) — both providers count reasoning + visible output in that budget, so reasoning models hit the cap before emitting the tool call. We discovered this, raised the budget to 65536, and re-ran the matrix. Anthropic was unaffected throughout: `max_tokens` on Anthropic counts output tokens only, with extended thinking on a separate budget. Anthropic was also capped at 8192 (vs 65536 for other providers) because Anthropic's SDK refuses non-streaming calls above that — but that ceiling is on *visible output*, not reasoning, and Anthropic's models comfortably emit their tool calls within it. The Anthropic numbers reflect genuine model behavior at full reasoning budgets.
 
 **What the matrix exposes is that Anthropic's reasoning models struggle specifically with sustained 2D spatial state-tracking** — exactly the cognitive failure mode this benchmark was designed to isolate. Anthropic excels on benchmarks that reward strong single-shot reasoning over textual or symbolic state (MMLU, GPQA, coding). It underperforms here because the benchmark is biased toward the dimension where Anthropic is comparatively weakest. The same models that fail to reach the endgame in chess routinely solve graduate-level math and write production code — chess-style spatial reasoning is a specific weakness, not a general one.
 
-Notably, **Sonnet 4.6 ranks below Haiku 4.5** within the Anthropic family on this dimension — the weakness doesn't track the standard "Haiku < Sonnet < Opus" capability ordering, supporting the "one specific dimension, not general capability" framing.
+Within the Anthropic family the standard "Haiku < Sonnet < Opus" capability ordering does hold here — Haiku 0.074, Sonnet 0.149, Opus 0.281 — but the spread is unusually wide. The model that's *strongest* on this dimension (Opus) is only mid-pack overall.
 
 The matrix is not a ranking of "best AI." It's a ranking on one cognitive dimension.
 
@@ -82,23 +102,23 @@ A natural reading of the matrix is that mid/endgame positions are "out of traini
 | `claude-opus-4-7` | 0.900 | 0.775 | -14% |
 | `deepseek-chat` | 0.500 | 0.225 | -55% |
 
-**The cliff is model-specific.** GPT-5, Flash Lite, and Sonnet handle novel positions essentially as well as memorized ones. Opus has a modest cliff. Only DeepSeek-chat has a sharp one. **Position novelty is NOT what's dragging the matrix Reliability of top cells.** GPT-5 with 100% legality on truly random positions still only scores 0.41 on Reliability. The cliff is in *cumulative gameplay coherence*, not in single-position handling.
+**The cliff is model-specific.** GPT-5, Flash Lite, and Sonnet handle novel positions essentially as well as memorized ones. Opus has a modest cliff. Only DeepSeek-chat has a sharp one. **Position novelty is NOT what's dragging the matrix Reliability of top cells.** GPT-5 with 100% legality on truly random positions still only scores 0.301 on Reliability — and it has 99.8% first-legal rate and zero forfeits across 166 games. Its score is dragged down purely by *move quality* (mean cp_loss ~85), not by failing to find legal moves. The cliff is in *cumulative gameplay coherence*, not in single-position handling.
 
 ### What drives the in-game cliff instead
 
-Three things compound across a 30-40 ply game that single-position tests don't capture:
+Three things compound across a 30–40 ply game that single-position tests don't capture:
 
-1. **Move quality (ACPL) degrades by phase even for models with no per-position cliff.** Flash Lite plays at ~62 cp loss in opening, ~128 cp in endgame. Engine-level is ~5-20 cp. The cliff is in *move strength*, not legality — models play legal but mediocre moves on mid/endgame positions.
-2. **Cumulative trajectory matters.** Real gameplay between an LLM and a stronger Stockfish opponent drifts into positions where the LLM is under pressure. Random novel banks don't reproduce this — they produce balanced or neutrally-random positions. Real games create *asymmetric pressure* positions that test something different from random novelty.
+1. **Move quality (ACPL) degrades by phase even for models with no per-position cliff.** Flash Lite plays at ~45 cp loss in opening, ~114 cp in endgame. Engine-level is ~5–20 cp. The cliff is in *move strength*, not legality — models play legal but mediocre moves on mid/endgame positions.
+2. **Cumulative trajectory matters.** Real gameplay between an LLM and Stockfish drifts into positions where the LLM is under pressure. Random novel banks don't reproduce this — they produce balanced or neutrally-random positions. Real games create *asymmetric pressure* positions that test something different from random novelty.
 3. **Persistent wrong belief compounds within games.** A model that gets a wrong picture of the position on ply 24 carries it through retries and into ply 25's similar position. Single-position evaluation can't capture this.
 
 ### Other matrix-level patterns
 
-**Reasoning-tier supremacy doesn't hold for spatial state-tracking.** Across the four frontier reasoning models, Reliability spans 0.12 to 0.53 — over a 4× spread. The matrix-leader is a budget non-reasoning model. Reasoning-tier optimization helps when the reasoning fits in the response budget AND when the model can apply it to spatial state — neither is guaranteed.
+**Reasoning-tier supremacy doesn't hold for spatial state-tracking.** Across the four frontier reasoning models, Reliability spans 0.28 to 0.49 — a ~1.7× spread that doesn't track the relative ordering on other benchmarks. The matrix co-leader is a budget non-reasoning model (Flash Lite at 0.477, essentially tied with frontier Gemini Pro at 0.485). Reasoning-tier optimization helps only when the reasoning fits in the response budget AND when the model can apply it to spatial state — neither is guaranteed.
 
-**Budget beats frontier in 1 of 4 providers.** Only OpenAI shows the inversion is preserved (`gpt-5-mini` 0.301 < `gpt-5` 0.410), but the gap is small. DeepSeek and Anthropic show the expected direction (frontier > budget). Google's two cells (Flash Lite > 2.5 Pro on Reliability, 2.5 Pro > Flash Lite on PlayQuality) split — Flash Lite plays more legal moves; 2.5 Pro plays better moves.
+**Budget beats or matches frontier in some providers.** Within Google, Flash Lite (budget) trails 2.5 Pro (frontier) by only 0.008 on Reliability and *exceeds* it 2.4× on PlayQuality. Within OpenAI, the inversion is preserved but the gap is tiny (`gpt-5-mini` 0.279 < `gpt-5` 0.301). DeepSeek and Anthropic show the expected direction (frontier > budget) with the expected gaps. Tier is not a strong predictor on this benchmark.
 
-**Failures concentrate on out-of-distribution positions for SOME models.** This is the dimension where models genuinely differ. Standard opening positions in the hand-curated bank show 0% failure rate across every model tested. Synthetic mid-game and endgame positions show 33-67% failure rates on the hardest examples. But — per the bank comparison above — only Opus and DeepSeek-chat show the failure rate jumping when positions become novel. Top cells don't.
+**Failure rates concentrate on out-of-distribution positions for SOME models.** This is the dimension where models genuinely differ. Standard opening positions in the hand-curated bank show 0% failure rate across every model tested. Synthetic mid-game and endgame positions show 33–67% failure rates on the hardest examples. But — per the bank comparison above — only Opus and DeepSeek-chat show the failure rate jumping when positions become novel. Top cells don't.
 
 ---
 
@@ -116,7 +136,7 @@ To test the "is the cliff about position novelty" hypothesis, we ran each of 5 m
 
 - **T0 hand-curated**: 20 positions including named openings (Italian, Ruy Lopez, etc.) and textbook endgames. Saturated in training data.
 - **T1 real-play extracted**: FENs extracted from real model-vs-Stockfish games where the model later made an illegal move. Out of training distribution, but selection-biased toward difficulty.
-- **T2 random-opening + Stockfish continuation**: random 5-10 ply opening + 15 plies Stockfish skill-5 self-play. Mid-game positions with no theory shortcut, engine-realistic structure. **Unbiased.**
+- **T2 random-opening + Stockfish continuation**: random 5–10 ply opening + 15 plies Stockfish skill-5 self-play. Mid-game positions with no theory shortcut, engine-realistic structure. **Unbiased.**
 - **T3 pure random-vs-random self-play**: 30 plies of random play. Maximally novel — no theory at any stage. **Unbiased.**
 
 Full per-position legality:
@@ -131,25 +151,45 @@ Full per-position legality:
 
 T1 numbers are selection-biased — those positions came from games where the model had failed, so they're hard *for that specific model*. T2 and T3 are unbiased random samples and are the cleanest "is this a novelty cliff" test.
 
+### Mean legal plies survived (PlayQuality, max 60)
+
+How far into a game the model gets before forfeit or natural termination:
+
+| Model | mean plies | of 60 |
+|---|---|---|
+| `gemini-3.1-flash-lite` | **43.1** | 72% |
+| `gpt-5` | 26.9 | 45% |
+| `deepseek-reasoner` | 25.3 | 42% |
+| `gemini-2.5-pro` | 20.5 | 34% |
+| `gpt-5-mini` | 19.9 | 33% |
+| `claude-opus-4-7` | 19.2 | 32% |
+| `claude-sonnet-4-6` | 14.9 | 25% |
+| `claude-haiku-4-5-20251001` | 10.0 | 17% |
+| `deepseek-chat` | 7.6 | 13% |
+
+Flash Lite reaches the endgame consistently — its mean is **2× the runner-up**. Note Gemini 2.5 Pro's anomalous low number: it's the top CR scorer but only 20.5 plies on PS. PS uses a harder Stockfish opponent (skill 5 vs 3); Pro survives long enough to score reliably on opening/early-mid plies but doesn't push deep into harder positions. Flash Lite's larger games-played ceiling is why its PS (0.466) is 2.4× Pro's PS (0.192).
+
 ### ACPL by phase across the matrix
 
 Move-quality gradient as games proceed (lower is better — engine-level is ACPL ~10):
 
 | Model | ACPL opening | ACPL middlegame | ACPL endgame |
 |---|---|---|---|
-| `gemini-3.1-flash-lite` | 62 | 53 | 128 |
-| `gemini-2.5-pro` | 31 | 99 | 112 |
-| `gpt-5` | 75 | 124 | 0 (not reached in 3 games) |
-| `deepseek-reasoner` | 131 | 140 | 70 |
-| `claude-opus-4-7` | 94 | 240 | 0 (not reached) |
-| `claude-haiku-4-5-20251001` | 70 | 0 (not reached) | 0 (not reached) |
-| `deepseek-chat` | 80 | 0 (not reached) | 0 (not reached) |
+| `gemini-2.5-pro` | 34 | 78 | 168 |
+| `gemini-3.1-flash-lite` | 45 | 77 | 114 |
+| `deepseek-chat` | 65 | not reached | not reached |
+| `claude-opus-4-7` | 66 | 103 | 123 |
+| `gpt-5` | 85 | 111 | 102 |
+| `deepseek-reasoner` | 85 | 172 | 118 |
+| `gpt-5-mini` | 101 | 117 | not reached |
+| `claude-haiku-4-5-20251001` | 103 | not reached | not reached |
+| `claude-sonnet-4-6` | 104 | 235 | not reached |
 
-Openings: ACPL 31-131 — meaningfully different across models, but all in "competent club player or stronger" band. Middlegame: ACPL roughly doubles or triples. Endgame: only the strongest cells reach it at all; ACPL doesn't always fall (Flash Lite endgame ACPL is 128, the worst of its three phases).
+Openings: ACPL 34–104 — meaningfully different across models, but all in "competent club player or stronger" territory. Middlegame: ACPL roughly doubles or triples for every model that reaches it. Endgame: only 5 of 9 cells reach it at all; ACPL doesn't always degrade further (Flash Lite endgame ACPL 114 is its worst phase but only modestly worse than middle 77; GPT-5's endgame ACPL 102 is actually *better* than its middle 111).
 
 ### Skill sweep — opponent strength is one knob, not the cliff
 
-Published Reliability uses Stockfish skill 3. We ran Flash Lite at skills 1, 5, 10, and 15 to see whether the score is sensitive to opponent strength:
+Published Reliability uses Stockfish skill 3. We ran Flash Lite at skills 1, 5, 10, and 15 to see whether the score is sensitive to opponent strength (numbers below are at the older 1/2/4/8 phase weighting but the curve shape is what matters):
 
 ```
 Stockfish skill 1   (~1100 ELO, beginner):       CR 0.352
@@ -249,16 +289,13 @@ Consistency-only failures are the largest bucket. **The model picks correctly bu
 ## Footnotes on the matrix
 
 <a id="footnote-a"></a>
-***ᵃ*** **`0.068`–`0.086` (Opus PlayQuality, DeepSeek-reasoner PlayQuality)** — model produces legal moves on most first attempts (63–78%) and plays moves of reasonable quality (cp_loss 80–240 on the plies it reaches), but the games rarely survive into endgame at Stockfish skill 5. With only 3 retries permitted in PlayQuality mode (vs Reliability's 10), even occasional length-failures and run-of-bad-positions cause early forfeits. Result: the high-weight late plies are mostly missing from the numerator while still counting toward the denominator.
+***ᵃ*** **`0.281` (Opus Reliability with 30% forfeit rate)** — Opus has 71.3% first-attempt-legal and 0.60 avg retries per move — meaningfully worse on rule-following than the Band-1 cells (79–100% first-legal). 48 of 160 games forfeited because retries couldn't recover a legal move. The Reliability composite is therefore a mix of "good Opus games that survive (mean ~21 plies on the games that complete)" with "lots of zero-scored forfeit games dragging down the mean." If we restricted to non-forfeit games only, the per-game mean would be substantially higher — but the metric is *intentionally* counting forfeits at 0 because forfeit-prone play is the failure mode the benchmark exists to measure.
 
 <a id="footnote-b"></a>
-***ᵇ*** **`0.014`–`0.040` (Haiku, DeepSeek-chat — both metrics)** — first-attempt-legal rate of 38–54% means roughly half of all moves are illegal on the first try. Each of those moves pays the `0.25^retries` cost (1 retry → 25% credit, 2 retries → 6%). Combined with games averaging only 10–20 plies before forfeiting on illegal moves they can't recover from, the score is dominated by missing late-game plies and retry-cost-eroded mid-game plies. This isn't a metric pathology — it's the metric correctly reflecting "model cannot reliably play legal chess past the opening, even with the retry safety net."
+***ᵇ*** **`0.046`–`0.097` (Haiku, DeepSeek-chat — both metrics)** — first-attempt-legal rate of 34–43% means the majority of moves are illegal on first try. Each of those moves pays the `0.25^retries` cost (1 retry → 25% credit, 2 retries → 6%). Worse: forfeit rates of 80–95% mean these models almost never complete a game, so most game-scores are at or near zero. Haiku forfeited 168 of 176 Reliability games; DeepSeek-chat forfeited 137 of 172. This isn't a metric pathology — it's the metric correctly reflecting "model cannot reliably play legal chess past the opening, even with a 10-retry safety net."
 
 <a id="footnote-c"></a>
-***ᶜ*** **`0.410` (GPT-5 Reliability with 97.8% first-attempt-legal)** — the asterisk here is the *opposite* situation: the model produces a legal move on first attempt ~98% of the time, but the composite is still moderate because Reliability multiplies three factors and first-attempt-legality is only one of them. GPT-5's mean cp_loss across legal moves is 86 → move_quality = exp(−86/150) = 0.564 (competent club play, not engine-level). One of the 5 games forfeited at ply 1, contributing 0 to the mean and subtracting ~0.20 from the composite. The remaining 4 games averaged 27 plies (vs max 40), missing the highest-weighted late-game plies. **High first-attempt-legal does not imply high Reliability** — read the columns together. [METHODOLOGY § Reliability is NOT first-attempt-legal](METHODOLOGY.md#reliability-is-not-first-attempt-legal--they-measure-different-things) walks through the decomposition.
-
-<a id="footnote-d"></a>
-***ᵈ*** **`0.15` (GPT-5 avg retries/move) with 97.8% first-attempt-legal** — this number can read as a contradiction with Gemini 2.5 Pro's `0.07 / 93.8%`: GPT-5 fails *less often* yet shows *more retries on average*. The retry distributions explain it. Gemini's 11 failed plies recovered in 1–2 retries each (total 12 retries across 11 failures). GPT-5's 3 failed plies needed 1, 10, and 10 retries respectively (total 21 retries across 3 failures) — when GPT-5 fails it usually burns through the entire stepdown ladder (`default → medium → low → minimal`) before producing a legal SAN. Two qualitatively different failure profiles: Gemini's failures are quick to recover; GPT-5's are reasoning-budget exhaustion that exhaust the full retry budget.
+***ᶜ*** **`0.301` (GPT-5 Reliability with 99.8% first-attempt-legal, zero retries, zero forfeits)** — the asterisk here is the *opposite* situation: GPT-5 produces a legal move on first attempt 99.8% of the time, needs an average of 0.00 retries per move (essentially never), and forfeited 0 of 166 games. Its score is still 0.301 because Reliability multiplies *three* factors and first-attempt-legality is only one of them. GPT-5's mean cp_loss across legal moves is ~85 → move_quality = exp(−85/150) ≈ 0.57 (competent club play, not engine-level). The composite is therefore "perfect legality × mid-range move quality × full game length." If GPT-5 played at engine quality (cp_loss ~5), its score would be ~0.95 — the structural ceiling. **High first-attempt-legal does not imply high Reliability** — read the columns together. [METHODOLOGY § Reliability is NOT first-attempt-legal](METHODOLOGY.md#reliability-is-not-first-attempt-legal--they-measure-different-things) walks through the decomposition.
 
 ---
 
@@ -276,7 +313,7 @@ What this benchmark contributes beyond prior work:
 1. **Cross-provider matrix at consistent methodology.** Most prior efforts evaluated single models with different prompts and metrics. The matrix here applies the same prompt schema, same retry budget, same scoring formula across nine cells from four providers.
 2. **Persistent wrong belief as a framed phenomenon.** Convergence on the same wrong move across stateless API calls is documented in prior threads anecdotally, but not articulated as a deterministic-not-random failure mode that's qualitatively distinct from typical hallucinations. The framing is what's new; the data exists in other places.
 3. **Multi-bank novelty test as direct experimental check.** Prior work inferred memorization indirectly from ACPL phase gradients. The 5-model × 4-bank gradient (hand-curated → real-play extracted → random-opening → pure random) tests memorization directly — and reveals that the cliff is model-specific, not universal. That nuance changes the story.
-4. **Composite scoring with multiplicative factors and geometric phase weight.** Most prior chess-LLM scoring used simple legality % or ELO. The scoring here is designed to (a) leave headroom at the top so the metric is hill-climbable, (b) penalize retry-as-crutch behavior, and (c) weight late-game plies higher to bake the memorization-cliff thesis into the score.
+4. **Composite scoring with multiplicative factors and softened phase weight.** Most prior chess-LLM scoring used simple legality % or ELO. The scoring here is designed to (a) leave headroom at the top so the metric is hill-climbable, (b) penalize retry-as-crutch behavior, and (c) weight late-game plies higher to bake the memorization-cliff thesis into the score.
 
 The contribution is more methodological than novel-result. The underlying observation that LLMs play chess poorly is not in dispute; the contribution is a structured way to measure how poorly, what mechanism drives the failure, and how the failure differs across models in ways the single-model literature doesn't capture.
 
@@ -286,8 +323,8 @@ The contribution is more methodological than novel-result. The underlying observ
 
 The benchmark measures one cognitive primitive: whether LLMs can pattern-match to good chess moves from current position alone, across stateless calls. The deepest claim is qualitative: **models form coherent-but-wrong mental models of the board and commit to them deterministically across stateless calls.** This is qualitatively different from typical hallucinations and is unlikely to be fixed by bigger context windows or more training data alone.
 
-Position novelty is NOT the explanation for in-game degradation in the top-of-matrix cells. Per-position legality tests across four progressively-more-novel banks show that Flash Lite, GPT-5, and Sonnet handle novel positions essentially as well as memorized ones (Opus has a modest cliff; only DeepSeek-chat has a sharp one). What drags matrix Reliability down for the top cells is move quality and cumulative gameplay dynamics — the cliff is in *cumulative coherence across turns*, not in *can the model handle one novel position*.
+Position novelty is NOT the explanation for in-game degradation in the top-of-matrix cells. Per-position legality tests across four progressively-more-novel banks show that Flash Lite, GPT-5, and Sonnet handle novel positions essentially as well as memorized ones (Opus has a modest cliff; only DeepSeek-chat has a sharp one). What drags matrix Reliability down for the top cells is **move quality** (engine-level play scores ~0.95; current top cells play at ACPL ~50–80 = competent club, mid-0.5 quality) and **forfeit rate** (Band-2 and Band-3 models lose games entirely to retry exhaustion). The cliff is in *cumulative coherence across turns*, not in *can the model handle one novel position*.
 
-The strongest model scores 0.639 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. The ranking does not track "reasoning tier" or "frontier vs budget" — it tracks something more specific about coherent state-tracking under stateless inference.
+The strongest model scores 0.485 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. The ranking does not track "reasoning tier" or "frontier vs budget" — Flash Lite (budget non-reasoning) is essentially tied with Gemini 2.5 Pro (frontier reasoning) on Reliability, and exceeds it 2.4× on PlayQuality. The benchmark tracks something more specific about coherent state-tracking under stateless inference.
 
-The scoring is designed to be **hill-climbable**. The current matrix top (0.64) leaves real room above 0.9, where engine-quality play would land. That headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate across 40 moves, without external scaffolding.
+The scoring is designed to be **hill-climbable**. The current matrix top (0.485) leaves real room above 0.9, where engine-quality play would land. That headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate across 40 moves, without external scaffolding.

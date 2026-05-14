@@ -43,7 +43,7 @@ Where:
 
 - **`retry_cost(retries) = 0.25 ^ retries`** — steep multiplicative penalty for needing the retry safety net. One retry costs 75% of the move's value; two retries cost 94%. In a real chess game, an illegal move is fatal; the benchmark is a generosity-graded approximation, and the 0.25 base ensures retried moves contribute almost nothing to the score.
 
-- **`game_phase_weight(ply) = 1 / 2 / 4 / 8`** — geometric weighting by ply bucket (boundaries at ply 10, 20, 30). Opening positions are saturated in training data (weight 1); mid-game progressively novel (weights 2, 4); endgame essentially unique from training (weight 8). The geometric shape directly encodes the memorization-cliff thesis into the metric: reaching ply 30 is worth 8× more than playing ply 5 perfectly.
+- **`game_phase_weight(ply) = 1 / 1.5 / 2 / 3`** — softened weighting by ply bucket (boundaries at ply 10, 20, 30). Opening positions are saturated in training data (weight 1); mid-game progressively novel (weights 1.5, 2); endgame essentially unique from training (weight 3). The shape encodes the memorization-cliff thesis into the metric (reaching ply 30 is worth 3× more than playing ply 5 perfectly) without making the denominator dominated by late plies — earlier iterations used 1/2/4/8 but that compressed scores too aggressively for models that broke down in middlegame.
 
 Per-game score:
 
@@ -53,7 +53,7 @@ per_game_score  =  sum(per_move_score for legal moves)  /  max_possible_weighted
 
 The denominator (`max_possible_weighted_score = sum(game_phase_weight(p) for p in 1..max_moves_per_game)`) is constant for a given `max_moves_per_game`. Unplayed plies (after a forfeit) contribute 0 to the numerator but their phase weight is still in the denominator. So an early forfeit loses BOTH the missing per-move scores AND access to the high-weight late plies — forfeit penalty scales with how much of the game was missed.
 
-ChessReliability = mean of per_game_score across N games. Standard config: N = 5 games, max 40 moves per game.
+ChessReliability = mean of per_game_score across N games. Published matrix uses N ≥ 20 games per cell (some cells went to N = 100+); max 40 plies per game.
 
 ### PlayQuality
 
@@ -73,9 +73,9 @@ Per-game score:
 per_game_score  =  sum(per_move_score for legal moves)  /  max_possible_weighted_score
 ```
 
-PlayQuality = mean across N = 3 games, max 60 moves per game.
+PlayQuality = mean across N ≥ 10 games (most cells N = 50+), max 60 plies per game.
 
-The difference from ChessReliability is intentional and conceptual: Reliability = "can the model play legal chess on first attempt"; PlayQuality = "given a legal move was found, how good was it." Both share the exponential quality decay and geometric phase weight, so their numbers are directly comparable at the per-move level.
+The difference from ChessReliability is intentional and conceptual: Reliability = "can the model play legal chess on first attempt"; PlayQuality = "given a legal move was found, how good was it." Both share the exponential quality decay and softened phase weight (1/1.5/2/3), so their numbers are directly comparable at the per-move level.
 
 ### Why three multiplicative factors
 
@@ -86,19 +86,19 @@ Both metrics use multiplicative structure so any factor near zero collapses the 
 The benchmark reports both **`first_attempt_legal_rate`** (a diagnostic — fraction of plies where the model's very first proposal was a legal SAN) and **`ChessReliability`** (the composite score). It's easy to assume "high first-attempt legality → high Reliability", but the composite has three factors and first-attempt-legality is only one of them. The other two can drag the score substantially even when legality is near-perfect:
 
 - **`move_quality(cp_loss)`**: a legal move with cp_loss = 86 has quality = exp(−86/150) = 0.564, not 1.0. Reaching engine-level play (cp_loss ~5) requires move_quality ~0.97. Most LLMs play moves with cp_loss in the 50-200 range — competent club-player territory, scoring 0.27-0.72 per move on quality alone.
-- **`game_phase_weight(ply)`**: ply-30+ moves are weighted 8×, ply-1-9 are weighted 1×. A model that forfeits early or stops at the max-ply cap before reaching late game loses access to the highest-weighted plies in the numerator while they remain in the denominator. The structural ceiling for a model that perfectly plays only to ply 20 (out of max 40) is ~0.18; perfectly to ply 30 is ~0.44; perfectly to ply 40 is 1.0.
-- **A single full forfeit** (game ends at ply 1 because the model can't produce a legal move even after all retries) drops that game's contribution to 0 regardless of how the other games went. In a 5-game gauntlet, one forfeit at ply 1 subtracts ~0.20 from the mean.
+- **`game_phase_weight(ply)`**: ply-30+ moves are weighted 3×, ply-1-9 are weighted 1×. A model that forfeits early or stops at the max-ply cap before reaching late game loses access to the highest-weighted plies in the numerator while they remain in the denominator. The structural ceiling for a model that perfectly plays only to ply 20 (out of max 40) is ~0.30; perfectly to ply 30 is ~0.59; perfectly to ply 40 is 1.0.
+- **A single full forfeit** (game ends at ply 1 because the model can't produce a legal move even after all retries) drops that game's contribution to 0 regardless of how the other games went. At N=20 games per cell, one forfeit subtracts ~0.05 from the mean — but cells with high forfeit rates (Haiku 95%, DeepSeek-chat 80%) have those zeroes dominating the mean.
 
-A concrete example from the published matrix: **GPT-5 has 97.8% first-attempt-legal but ChessReliability = 0.410.** Decomposing:
+A concrete example from the published matrix: **GPT-5 has 99.8% first-attempt-legal, 0.00 avg retries, and zero forfeits — but ChessReliability = 0.301.** Decomposing:
 
 | Factor | Contribution |
 |---|---|
-| Mean cp_loss across legal moves: 86 → quality = 0.564 | Caps the score around 0.56 even if every move were legal |
-| One game forfeited at ply 1 (1 of 5) | Subtracts ~0.20 from mean |
-| Remaining 4 games averaged 27 plies played (vs max 40) | Misses the highest-weighted late plies; ~0.39 structural ceiling for play-to-ply-27 |
-| Retry cost (0.01 retries/move) | Negligible |
+| Mean cp_loss across legal moves: ~85 → quality = exp(−85/150) ≈ 0.57 | Caps the score around 0.57 even at perfect legality |
+| Zero forfeits across 166 games | No penalty here |
+| Games reach mean ply ~26 (vs max 40) | Misses some high-weight late plies; ~0.45 structural ceiling for typical-game-length |
+| Retry cost (0.00 retries/move) | No penalty here |
 
-The 0.41 composite is the product of "near-perfect legality × mid-range quality × partial late-game coverage." Read the columns together — first-attempt-legal alone is not a stand-in for Reliability.
+The 0.301 composite is the product of "perfect legality × mid-range quality × partial late-game coverage." Read the columns together — first-attempt-legal alone is not a stand-in for Reliability. If GPT-5 played at engine quality (cp_loss ~5), the same legality and game-length profile would score ~0.93.
 
 ### Reference points
 
@@ -106,14 +106,14 @@ The 0.41 composite is the product of "near-perfect legality × mid-range quality
 |---|---|
 | 1.000 | Theoretical max — engine-quality moves across all 40 plies, zero retries |
 | 0.85-0.95 | Hypothetical: a model playing at engine-equivalent move quality |
-| 0.55-0.75 | Best current LLMs on this benchmark (vs amateur-tier Stockfish opponent) |
-| 0.30-0.50 | LLMs that survive into mid-game but with mediocre quality |
-| 0.10-0.20 | LLMs that struggle past opening |
-| 0.00-0.05 | Forfeit before mid-game, or heavy retry dependence |
+| 0.40-0.55 | Best current LLMs on this benchmark (vs amateur-tier Stockfish opponent) |
+| 0.25-0.40 | LLMs that survive games but play mid-range moves |
+| 0.10-0.20 | LLMs that struggle past middlegame or have meaningful forfeit rates |
+| 0.00-0.10 | High-forfeit-rate cells; the metric correctly reflects "model can't reliably complete games" |
 
 The 1.0 reference is the theoretical maximum of the metric (engine-quality moves with no retries needed across a full game) — *not* a benchmark cell. The benchmark plays models against amateur-tier opponents (skill 3 / skill 5); the engine-quality calibration is the scoring anchor, not a comparison target.
 
-Current matrix range: **0.032 (Claude Haiku) to 0.639 (Gemini 3.1 Flash Lite)**. See [RESULTS.md](RESULTS.md) for the full matrix.
+Current matrix range: **0.074 (Claude Haiku) to 0.485 (Gemini 2.5 Pro)**. See [RESULTS.md](RESULTS.md) for the full matrix.
 
 ### Average Centipawn Loss (ACPL) — diagnostic
 
@@ -125,17 +125,19 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 
 **Caveats:**
 
-- **Sample sizes are small by default** (5 games for Reliability, 3 for PlayQuality). Enough for qualitative pattern signal but not for tight effect sizes. A 0.02 difference between two models could be sampling noise. Raise `--games` for publishable comparisons.
+- **Default `--games` is small** (5 for Reliability, 3 for PlayQuality). Enough for qualitative pattern signal but not for tight effect sizes. The published matrix used N ≥ 20 per cell (many cells N = 100+) for stable means. A 0.02 difference between two models at N=5 could be sampling noise; at N=20+ it's more durable.
 - **Stockfish version matters.** Move-quality scores depend on the engine's evaluation function. Lock the binary version when comparing across runs. This work used Stockfish 18.
 - **Provider tool-calling differences.** Each provider's structured-output format works slightly differently. The adapters normalize these; a regression on a specific provider can show up as a benchmark regression. Always grep the run JSONL for `"did not call submit_move"` before drawing conclusions.
+- **Quota-corrupted games are dropped.** Per-game error filter removes games where any move hit a 429 / quota error mid-game (so the run isn't contaminated by half-played games where a provider's billing failed silently). Drop counts are reported alongside N per cell in the aggregated output.
 - **This is not a chess-skill benchmark.** A model that's bad at chess but rule-consistent would score well. The eval measures state-tracking and rule-following; ELO is incidental.
 
 **Reasonable expectations:**
 
-- LLMs on this benchmark span 0.03 to 0.64 on Reliability. The top is a budget non-reasoning model; the bottom is two budget models and one frontier model. Reasoning-tier optimization is neither necessary nor sufficient for high scores.
-- The first-attempt legal rate column is the most diagnostic single number — it measures the fraction of plies where the model's very first proposal (zero retries) was legal. Reads independently of how forgiving the harness is. Read it alongside the composite.
+- LLMs on this benchmark span 0.07 to 0.49 on Reliability. The top two are a Google frontier reasoning model and a Google budget non-reasoning model, essentially tied. Reasoning-tier optimization is neither necessary nor sufficient for high scores.
+- The first-attempt-legal rate and forfeit-rate columns are the most diagnostic single numbers — first-legal measures the fraction of plies where the model's very first proposal (zero retries) was legal; forfeit-rate measures the fraction of games that ended because retries couldn't recover a legal move. Both read independently of scoring choices.
 - Opening positions show **0% failure rate** for every model tested. Failures concentrate on positions outside training distribution.
-- The scoring is designed to be hill-climbable. Today's top (0.64) leaves real room above. Engine-level play would score 0.95+. The gap is the cognitive headroom.
+- Choice of `move_quality` decay constant (τ=150) is not load-bearing: re-scoring at τ ∈ {100, 200, 300} produces identical model rankings with absolute scores shifting ~20%. See [RESULTS.md § τ sensitivity](RESULTS.md#methodology-robustness--τ-sensitivity).
+- The scoring is designed to be hill-climbable. Today's top (0.49) leaves real room above. Engine-level play would score 0.95+. The gap is the cognitive headroom.
 
 ---
 

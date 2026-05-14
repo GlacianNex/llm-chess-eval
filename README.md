@@ -2,7 +2,7 @@
 
 A reproducible benchmark that measures whether LLMs can maintain coherent state and apply rules across many reasoning turns, using chess as a substrate. The cognitive failure mode it isolates is **state reconstruction and 2D spatial reasoning on out-of-distribution positions** — a weakness that shows up wherever LLMs operate on structured state, not just chess.
 
-**The strongest model in the cross-family matrix scores 0.64 on a [0, 1] ChessReliability scale where Stockfish self-play is the 1.0 reference.** That's a budget non-reasoning model. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek either struggle on first-attempt legality or score below the budget top on the composite anyway.
+**The strongest models in the cross-family matrix score 0.48 on a [0, 1] ChessReliability scale where Stockfish self-play is the 1.0 reference.** Gemini 2.5 Pro (frontier reasoning) and Flash Lite (budget non-reasoning) are essentially tied at the top — and Flash Lite *exceeds* Pro 2.4× on PlayQuality. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek cluster around 0.28–0.30, with budget cells from Anthropic and DeepSeek collapsing under 0.10 due to high forfeit rates.
 
 📊 **[RESULTS.md](RESULTS.md)** — the matrix, findings, deep dives
 📖 **[METHODOLOGY.md](METHODOLOGY.md)** — scoring formulas, methodology constraints, reproduction recipe
@@ -16,7 +16,7 @@ Two composite scores per model, both bounded in `[0, 1]`:
 
 Both metrics use amateur-tier Stockfish opponents — this is not a model-vs-engine comparison. The 1.0 reference on the [0, 1] scale is Stockfish self-play as a scoring anchor, not the opponent the benchmark plays against.
 
-Per-move score multiplies three factors: exponential decay over centipawn loss vs Stockfish's best, a `0.25^retries` cost on retries, and a geometric phase weight (1 / 2 / 4 / 8 at ply boundaries 10 / 20 / 30) that makes late-game plies dominate the score. The geometric phase weight bakes the memorization-cliff thesis directly into the metric.
+Per-move score multiplies three factors: exponential decay over centipawn loss vs Stockfish's best, a `0.25^retries` cost on retries, and a phase weight (1 / 1.5 / 2 / 3 at ply boundaries 10 / 20 / 30) that makes late-game plies count more in the composite. The phase weight bakes the memorization-cliff thesis directly into the metric.
 
 See [METHODOLOGY.md](METHODOLOGY.md) for the full formulas and the rationale behind each factor.
 
