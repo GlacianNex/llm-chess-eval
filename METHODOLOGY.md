@@ -164,7 +164,7 @@ llm-chess-eval check-env
 llm-chess-eval reliability   --model claude-opus-4-7 --games 5
 llm-chess-eval play-strength --model claude-opus-4-7 --games 3
 
-# Full cross-provider matrix (~$25-40 total)
+# Full cross-provider matrix (~$10-15 total at default N)
 llm-chess-eval benchmark --dry-run    # preview, no spend
 llm-chess-eval benchmark
 
@@ -180,11 +180,11 @@ python scripts/matrix_with_retry_context.py
 
 | Model class | Reliability + PlayQuality cost | Wall time |
 |---|---|---|
-| Mid-tier non-reasoning (Haiku, Flash Lite) | ~$0.30-0.50 | ~6-15 min |
-| Strong reasoning (Opus) | ~$3-5 | ~12-30 min |
-| Slow reasoning (GPT-5, Gemini Pro Preview, DeepSeek-reasoner) | ~$5-15 | ~30-180 min |
+| Mid-tier non-reasoning (Haiku, Flash Lite) | ~$0.20-0.40 | ~6-15 min |
+| Strong reasoning (Opus, Sonnet) | ~$1-3 | ~12-30 min |
+| Slow reasoning (GPT-5, DeepSeek-reasoner) | ~$3-8 | ~30-180 min |
 
-Full matrix: **~$25-40 in API spend, ~3-6 hours wall time** if jobs run sequentially. Parallelize across providers to cut wall time roughly in half. Single Stockfish skill, single position bank — no per-cell methodological knobs to tune.
+Full matrix: **~$10-15 in API spend, ~3-6 hours wall time** if jobs run sequentially. Parallelize across providers to cut wall time roughly in half. Single Stockfish skill, single position bank — no per-cell methodological knobs to tune. Calibrated against actual project costs: the total spend across all bug-discovery cycles, re-runs, bank comparisons, and skill sweeps in producing the published numbers was ~$110 across all four providers combined.
 
 ### Repository layout
 
