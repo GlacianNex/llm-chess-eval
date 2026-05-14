@@ -139,6 +139,7 @@ Move-quality gradient as games proceed (lower is better — engine-level is ACPL
 |---|---|---|---|
 | `gemini-3.1-flash-lite` | 62 | 53 | 128 |
 | `gemini-2.5-pro` | 31 | 99 | 112 |
+| `gpt-5` | 75 | 124 | 0 (not reached in 3 games) |
 | `deepseek-reasoner` | 131 | 140 | 70 |
 | `claude-opus-4-7` | 94 | 240 | 0 (not reached) |
 | `claude-haiku-4-5-20251001` | 70 | 0 (not reached) | 0 (not reached) |
