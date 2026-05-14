@@ -262,6 +262,26 @@ Consistency-only failures are the largest bucket. **The model picks correctly bu
 
 ---
 
+## Related work
+
+Several prior efforts have examined LLM chess capability and adjacent failure modes. This work builds on them; it does not exist in a vacuum.
+
+- **Adam Karvonen** and others (2023–2024) showed that `gpt-3.5-turbo-instruct` plays at roughly 1700-1800 ELO when prompted with a chess-game-style prefix, with characteristic blunders concentrated in mid/endgame. That work focused on a single OpenAI model and used playing strength (ELO) as the headline metric.
+- **DeepMind's "Grandmaster-Level Chess Without Search"** (Ruoss et al., 2024) trained a 270M-parameter transformer to play ~2300 ELO via supervised learning on Stockfish-labeled positions — demonstrating that transformer architectures *can* learn chess pattern-matching well when explicitly trained for it. General-purpose LLMs are not trained that way, which makes the comparison to chess-specialist transformers informative rather than damning.
+- **Levy Rozman's viral video** (referenced earlier) documented illegal-move sequences, phantom pieces, and incoherent plans in LLM-vs-LLM play. It's the qualitative version of what this benchmark scores numerically.
+- **Various blog posts and Twitter threads** documenting illegal-move rates, fork blindness, and hallucinated piece positions in GPT-3.5/4 and Claude across 2023–2025. Most measured single-position legality without composing it into a cumulative-game score.
+
+What this benchmark contributes beyond prior work:
+
+1. **Cross-provider matrix at consistent methodology.** Most prior efforts evaluated single models with different prompts and metrics. The matrix here applies the same prompt schema, same retry budget, same scoring formula across nine cells from four providers.
+2. **Persistent wrong belief as a framed phenomenon.** Convergence on the same wrong move across stateless API calls is documented in prior threads anecdotally, but not articulated as a deterministic-not-random failure mode that's qualitatively distinct from typical hallucinations. The framing is what's new; the data exists in other places.
+3. **Multi-bank novelty test as direct experimental check.** Prior work inferred memorization indirectly from ACPL phase gradients. The 5-model × 4-bank gradient (hand-curated → real-play extracted → random-opening → pure random) tests memorization directly — and reveals that the cliff is model-specific, not universal. That nuance changes the story.
+4. **Composite scoring with multiplicative factors and geometric phase weight.** Most prior chess-LLM scoring used simple legality % or ELO. The scoring here is designed to (a) leave headroom at the top so the metric is hill-climbable, (b) penalize retry-as-crutch behavior, and (c) weight late-game plies higher to bake the memorization-cliff thesis into the score.
+
+The contribution is more methodological than novel-result. The underlying observation that LLMs play chess poorly is not in dispute; the contribution is a structured way to measure how poorly, what mechanism drives the failure, and how the failure differs across models in ways the single-model literature doesn't capture.
+
+---
+
 ## The bottom line
 
 The benchmark measures one cognitive primitive: whether LLMs can pattern-match to good chess moves from current position alone, across stateless calls. The deepest claim is qualitative: **models form coherent-but-wrong mental models of the board and commit to them deterministically across stateless calls.** This is qualitatively different from typical hallucinations and is unlikely to be fixed by bigger context windows or more training data alone.
