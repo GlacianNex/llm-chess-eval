@@ -112,11 +112,35 @@ Three things compound across a 30–40 ply game that single-position tests don't
 2. **Cumulative trajectory matters.** Real gameplay between an LLM and Stockfish drifts into positions where the LLM is under pressure. Random novel banks don't reproduce this — they produce balanced or neutrally-random positions. Real games create *asymmetric pressure* positions that test something different from random novelty.
 3. **Persistent wrong belief compounds within games.** A model that gets a wrong picture of the position on ply 24 carries it through retries and into ply 25's similar position. Single-position evaluation can't capture this.
 
+### The Flash Lite outlier — why a budget non-reasoning model nearly tops the matrix
+
+Flash Lite is the single most surprising cell. It's a budget non-reasoning model from Google that essentially **ties** the frontier reasoning model from the same family on Reliability (0.477 vs Gemini 2.5 Pro's 0.485) and **dominates** every other cell on PlayQuality (0.466 vs the next-best at 0.237). And it does this *despite* being demonstrably worse on rule-following than the top OpenAI cell:
+
+| | Flash Lite | GPT-5 |
+|---|---|---|
+| first-attempt-legal | 86.5% | **99.8%** |
+| avg retries / move | 0.20 | **0.00** |
+| forfeit rate | 5% (8/160) | **0% (0/166)** |
+| Reliability | **0.477** | 0.301 |
+| PlayQuality | **0.466** | 0.237 |
+
+How does the worse-on-legality model score 1.5–2× higher on the composite? Three contributors stack:
+
+1. **Move quality is substantially better when Flash Lite plays a legal move.** Opening ACPL 45 vs GPT-5's 85; middlegame 77 vs 111. Flash Lite plays at strong club-player strength; GPT-5 plays at intermediate club strength. The `exp(-cp_loss/150)` move-quality function is steep at the middle of its range, so a 40-point ACPL gap produces a ~30% per-move quality difference that compounds across 25–40 plies per game.
+
+2. **Flash Lite reaches the endgame consistently; GPT-5 does not.** PS mean legal plies: Flash Lite 43.1, GPT-5 26.9. The phase-weight function gives ply-30+ plies 3× the weight of opening plies, so a model that survives 43 plies sees substantially more high-weight contribution to its score than one that stops at 27.
+
+3. **The 5% forfeit rate is real but not crippling.** 8 of 160 Reliability games forfeited — those games contribute 0 to the mean, subtracting ~0.025 from the composite. The remaining 152 games are enough to dominate. Compare Haiku's 95% forfeit rate, which mathematically caps the composite at ~0.05 regardless of how well the surviving games play.
+
+**The story isn't "Flash Lite has bad rule-following despite good play."** It's that this composite metric weights move quality and game survival heavily, and Flash Lite trades off "near-perfect single-move legality" for "stronger moves overall and deeper games" — the trade pays off in the composite. Three factors multiply; legality is one of them.
+
+A reasonable reading: **Flash Lite's pre-training has more chess-relevant pattern coverage per parameter than its reasoning-tier siblings.** The Gemini family carries strong chess priors (Flash Lite handles unbiased novel positions at 0.90 legality, only 0.05 below the T0 hand-curated bank — see the 5-model × 4-bank table above), and the budget non-reasoning model gets to deploy that pattern-matching directly without paying for reasoning that, for GPT-5, doesn't translate into substantially better play on this task.
+
+**This pattern doesn't generalize.** There's no rule that smaller-cheaper-faster models win on this benchmark. GPT-5-mini (also budget, also non-reasoning-tier-by-default for many calls) scores 0.279 on Reliability and 0.149 on PlayQuality — comparable to its frontier sibling, not exceeding it. DeepSeek-chat (budget non-reasoning) collapses at 0.097. The Flash Lite outlier is specifically about how Google's chess pre-training scales down to the budget cell. It is an *observation about Flash Lite*, not a claim about "budget tier beats frontier."
+
 ### Other matrix-level patterns
 
-**Reasoning-tier supremacy doesn't hold for spatial state-tracking.** Across the four frontier reasoning models, Reliability spans 0.28 to 0.49 — a ~1.7× spread that doesn't track the relative ordering on other benchmarks. The matrix co-leader is a budget non-reasoning model (Flash Lite at 0.477, essentially tied with frontier Gemini Pro at 0.485). Reasoning-tier optimization helps only when the reasoning fits in the response budget AND when the model can apply it to spatial state — neither is guaranteed.
-
-**Budget beats or matches frontier in some providers.** Within Google, Flash Lite (budget) trails 2.5 Pro (frontier) by only 0.008 on Reliability and *exceeds* it 2.4× on PlayQuality. Within OpenAI, the inversion is preserved but the gap is tiny (`gpt-5-mini` 0.279 < `gpt-5` 0.301). DeepSeek and Anthropic show the expected direction (frontier > budget) with the expected gaps. Tier is not a strong predictor on this benchmark.
+**Reasoning-tier supremacy doesn't hold for spatial state-tracking.** Across the four frontier reasoning models, Reliability spans 0.28 to 0.49 — a ~1.7× spread that doesn't track the relative ordering on other benchmarks. Reasoning-tier optimization helps only when the reasoning fits in the response budget AND when the model can apply it to spatial state — neither is guaranteed. Within-family budget-vs-frontier comparisons: Google has Flash Lite essentially tied with Pro (Flash Lite outlier explained above); OpenAI has GPT-5-mini ~7% below GPT-5; DeepSeek and Anthropic preserve the expected frontier > budget direction with clear gaps. Tier is not a strong predictor on this benchmark.
 
 **Failure rates concentrate on out-of-distribution positions for SOME models.** This is the dimension where models genuinely differ. Standard opening positions in the hand-curated bank show 0% failure rate across every model tested. Synthetic mid-game and endgame positions show 33–67% failure rates on the hardest examples. But — per the bank comparison above — only Opus and DeepSeek-chat show the failure rate jumping when positions become novel. Top cells don't.
 
