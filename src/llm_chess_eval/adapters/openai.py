@@ -66,9 +66,9 @@ class OpenAIAdapter:
         self.max_tokens = max_tokens
         self.augment_legal_moves = augment_legal_moves
         # We do NOT default reasoning_effort to "low" — that would handicap the model
-        # and measure a degraded version of it. Users who want a cheaper/faster eval
-        # can pass reasoning_effort="low" explicitly. By default we let the provider's
-        # default reasoning level run (currently "medium" for GPT-5).
+        # and measure a degraded version of it. Users who want a faster eval can pass
+        # reasoning_effort="low" explicitly. By default we let the provider's default
+        # reasoning level run (currently "medium" for GPT-5).
         self.reasoning_effort = reasoning_effort
         self._client = OpenAI(api_key=_api_key())
 

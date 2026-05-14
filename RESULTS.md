@@ -136,7 +136,7 @@ How does the worse-on-legality model score 1.5–2× higher on the composite? Th
 
 A reasonable reading: **Flash Lite's pre-training has more chess-relevant pattern coverage per parameter than its reasoning-tier siblings.** The Gemini family carries strong chess priors (Flash Lite handles unbiased novel positions at 0.90 legality, only 0.05 below the T0 hand-curated bank — see the 5-model × 4-bank table above), and the budget non-reasoning model gets to deploy that pattern-matching directly without paying for reasoning that, for GPT-5, doesn't translate into substantially better play on this task.
 
-**This pattern doesn't generalize.** There's no rule that smaller-cheaper-faster models win on this benchmark. GPT-5-mini (also budget, also non-reasoning-tier-by-default for many calls) scores 0.279 on Reliability and 0.149 on PlayQuality — comparable to its frontier sibling, not exceeding it. DeepSeek-chat (budget non-reasoning) collapses at 0.097. The Flash Lite outlier is specifically about how Google's chess pre-training scales down to the budget cell. It is an *observation about Flash Lite*, not a claim about "budget tier beats frontier."
+**This pattern doesn't generalize.** There's no rule that smaller models win on this benchmark. GPT-5-mini (also budget, also non-reasoning-tier-by-default for many calls) scores 0.279 on Reliability and 0.149 on PlayQuality — comparable to its frontier sibling, not exceeding it. DeepSeek-chat (budget non-reasoning) collapses at 0.097. The Flash Lite outlier is specifically about how Google's chess pre-training scales down to the budget cell. It is an *observation about Flash Lite*, not a claim about "budget tier beats frontier."
 
 ### Other matrix-level patterns
 

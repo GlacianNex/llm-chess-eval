@@ -12,7 +12,7 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 V1_MODELS = ["claude-opus-4-7", "claude-sonnet-4-6"]
 
 # Standardized model matrix for cross-provider ranking.
-# Each provider contributes one "frontier" (strongest) and one "budget" (cheapest reasonable) tier.
+# Each provider contributes one "frontier" (strongest) and one "budget" (smaller/faster sibling) tier.
 BENCHMARK_MATRIX: dict[str, dict[str, str]] = {
     "anthropic": {"frontier": "claude-opus-4-7",          "budget": "claude-haiku-4-5-20251001"},
     "openai":    {"frontier": "gpt-5",                    "budget": "gpt-5-mini"},

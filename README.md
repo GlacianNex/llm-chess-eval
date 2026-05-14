@@ -46,7 +46,7 @@ llm-chess-eval reliability   --model claude-opus-4-7 --games 5
 llm-chess-eval play-strength --model claude-opus-4-7 --games 3
 
 # Cross-provider 8-cell matrix (frontier + budget for 4 providers)
-llm-chess-eval benchmark --dry-run    # preview, no spend
+llm-chess-eval benchmark --dry-run    # preview cells without invoking models
 llm-chess-eval benchmark              # runs all 8 cells
 ```
 

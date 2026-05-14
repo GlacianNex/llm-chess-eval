@@ -17,7 +17,7 @@ That gap matters in practice. The same model that scores 90% on a coding benchma
 - Two oracles: `python-chess` for deterministic rule-checking (no judgment), Stockfish for strength evaluation.
 - A built-in difficulty calibration. The first 5-10 moves of nearly every game are saturated in training data. After that, branching combinatorics push games into positions essentially never repeated. **The same model on the same task shifts from pattern-recall to spatial reasoning within ~10 moves.** We see the cliff happen.
 
-The benchmark is small, cheap (~$2-10 per model), and runs across any provider (Anthropic, OpenAI, Google, DeepSeek, OpenAI-API-compatible endpoints) through a single CLI.
+The benchmark runs across any provider (Anthropic, OpenAI, Google, DeepSeek, OpenAI-API-compatible endpoints) through a single CLI.
 
 ---
 
@@ -167,14 +167,14 @@ llm-chess-eval reliability   --model claude-opus-4-7 --games 5
 llm-chess-eval play-strength --model claude-opus-4-7 --games 3
 
 # Full cross-provider matrix
-llm-chess-eval benchmark --dry-run    # preview, no spend
+llm-chess-eval benchmark --dry-run    # preview cells without invoking models
 llm-chess-eval benchmark
 
 # Component evals for diagnostic depth
 llm-chess-eval legality    --model claude-opus-4-7
 llm-chess-eval consistency --model claude-opus-4-7
 
-# Re-score existing runs with the canonical formula (no API spend)
+# Re-score existing runs with the canonical formula (no model invocations)
 python scripts/matrix_with_retry_context.py
 ```
 
