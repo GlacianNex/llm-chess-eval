@@ -11,7 +11,8 @@ Complement to ChessReliability:
 Metric (per game, then averaged across games):
     per_move_score = move_quality(cp_loss) × game_phase_weight(ply)
     move_quality(cp_loss) = exp(-cp_loss / QUALITY_DECAY_CONSTANT)
-    game_phase_weight(ply) = 1 / 2 / 4 / 8 by ply bucket (geometric)
+    game_phase_weight(ply) = 1 / 1.5 / 2 / 3 by ply bucket (softened from
+    earlier 1/2/4/8 so the denominator isn't dominated by late plies)
 
     game_score = sum_over_legal_moves(per_move_score) / max_possible_weighted_score
 
@@ -30,7 +31,7 @@ into the metric: surviving to ply 30 is worth more than playing ply 5 well.
 Default config:
     - retry mode with max_retries = 3 (no per-retry cost)
     - QUALITY_DECAY_CONSTANT = 150 (same as ChessReliability)
-    - Phase weights 1/2/4/8 at ply boundaries 10/20/30 (same as ChessReliability)
+    - Phase weights 1/1.5/2/3 at ply boundaries 10/20/30 (same as ChessReliability)
     - Stockfish skill 5, max_plies 60
 
 Reported separately:
@@ -59,14 +60,14 @@ def _phase_for_move(ply: int) -> str:
 
 
 def _game_phase_weight(ply: int) -> float:
-    """Geometric phase weight; matches CR. Each phase doubles."""
+    """Softened phase weight; matches CR. Endgame at 3× opening (was 8×)."""
     if ply < 10:
         return 1.0
     if ply < 20:
-        return 2.0
+        return 1.5
     if ply < 30:
-        return 4.0
-    return 8.0
+        return 2.0
+    return 3.0
 
 
 def _max_possible_weighted_score(max_plies: int) -> float:

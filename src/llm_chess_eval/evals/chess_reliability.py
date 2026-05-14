@@ -19,12 +19,12 @@ three multiplicative components per move:
         2 retries cost 94%. Models that need the retry safety net to find
         a legal move can't recover the score even when they eventually do.
 
-    game_phase_weight(ply) = 1 / 2 / 4 / 8 by ply bucket
-        geometric — doubles per phase. Aligns with the memorization-cliff
-        thesis: opening positions are saturated training data (weight 1),
-        mid-game progressively novel (2, 4), endgame essentially unique
-        from training (8). Models that fail to reach late game score low
-        because they miss the high-weight plies.
+    game_phase_weight(ply) = 1 / 1.5 / 2 / 3 by ply bucket
+        Softened from earlier 1/2/4/8 — endgame still counts more (3× opening)
+        but the denominator isn't dominated by late plies. Encodes the
+        memorization-cliff thesis (later plies are progressively more novel
+        from training) without making scores collapse for models that break
+        down in middlegame.
 
 Per-game score:
     game_score = sum_over_legal_moves(per_move_score) / max_possible_weighted_score
@@ -42,7 +42,7 @@ Default config:
     - retry mode with max_retries = 10 (so games have many chances to complete)
     - QUALITY_DECAY_CONSTANT = 150 (puts grandmaster-level play at ~0.7 and
       club-level at ~0.35; leaves real headroom above current matrix top)
-    - Phase weights 1/2/4/8 at ply boundaries 10/20/30
+    - Phase weights 1/1.5/2/3 at ply boundaries 10/20/30
     - Stockfish skill 3, max_moves 40
 
 The metric is bounded [0, 1]; Stockfish self-play would score 1.0. Current
@@ -63,14 +63,19 @@ DEFAULT_MAX_RETRIES = 10
 
 
 def _game_phase_weight(ply: int) -> float:
-    """Geometric: each phase doubles. Aligns with memorization-cliff."""
+    """Softened phase weights — late game still counts more, but not geometrically.
+    Endgame at 3× opening (was 8×) so scores aren't dominated by whether the
+    model reaches ply 30+. Still encodes the memorization-cliff thesis (later
+    plies are progressively more novel from training) but with a less punishing
+    denominator for models that break down in middlegame.
+    """
     if ply < 10:
         return 1.0
     if ply < 20:
-        return 2.0
+        return 1.5
     if ply < 30:
-        return 4.0
-    return 8.0
+        return 2.0
+    return 3.0
 
 
 def _max_possible_weighted_score(max_plies: int) -> float:
