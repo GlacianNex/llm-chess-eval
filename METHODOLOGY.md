@@ -21,48 +21,24 @@ The benchmark runs across any provider (Anthropic, OpenAI, Google, DeepSeek, Ope
 
 ---
 
-## The design hypothesis: cumulative coherence and the (model-specific) memorization cliff
+## The design hypothesis: cumulative coherence and the memorization cliff
 
-The benchmark was designed around one specific claim about how LLMs play chess: **performance degrades across a game's length, not because positions get harder in absolute terms, but because the model has to sustain coherent state-tracking turn after turn.** The phase weight in the metric encodes this. The hypothesis came in two parts originally; the data supports one cleanly, the other only partially.
+The benchmark is designed around one specific claim about how LLMs play chess: **performance degrades across a game's length, not because positions get harder in absolute terms, but because the model has to sustain coherent state-tracking turn after turn.** The phase weight in the metric encodes this.
 
-### Part 1 (supported): cumulative-coherence failure across turns
+Two specific mechanisms could produce that degradation, and the benchmark is designed to separate them:
 
-What the data shows: **most models that survive to all three phases of a game play progressively worse moves as the game proceeds.** ACPL by phase from the matrix:
+**Mechanism A — cumulative-coherence failure across turns.** State-tracking errors accumulate as the model makes more independent stateless inferences over a game. Even on positions the model could handle in isolation, the cumulative drift across 30–40 turns can corrupt its mental model of the board. Tested by **ACPL-by-phase within full games**: rising ACPL through opening → middlegame → endgame is the signal. The phase weight (1 / 1.5 / 2 / 3) rewards models that resist this drift.
 
-| Model | opening | middlegame | endgame |
-|---|---|---|---|
-| `gemini-2.5-pro` | 34 | 78 | 168 |
-| `gemini-3.1-flash-lite` | 45 | 77 | 114 |
-| `claude-opus-4-7` | 66 | 103 | 123 |
-| `gpt-5` | 85 | 111 | 102 |
-| `deepseek-reasoner` | 85 | 172 | 118 |
+**Mechanism B — per-position memorization cliff.** Chess has ~10^120 distinct positions; openings (~5,000 named) appear thousands of times in training corpora, mid/endgame positions are essentially unique. A model that pattern-matches without genuine state-tracking should show a *per-position* legality cliff as positions drift out of training distribution, regardless of how the position was reached. Tested by **per-position legality on banks of increasing training-novelty** (hand-curated → real-play → random-opening → pure random self-play).
 
-Every cell that reaches the endgame shows the gradient, with one exception: GPT-5 is roughly flat across phases (consistently mid-quality everywhere). For weaker cells that never reach the endgame at all (Haiku, DeepSeek-chat — 80–95% forfeit rate), the cumulative-coherence claim is supported even more starkly: they can't survive long enough *for* the cliff to bite. The phase weight in the metric (1 / 1.5 / 2 / 3) is justified primarily by this: surviving to ply 30+ with maintained quality is harder than playing ply 5 well, and the metric should reward it.
+The two mechanisms are independent in principle — a model can fail at one without failing at the other. We test both because the cognitive failure they imply is different: A is about drift across stateless calls, B is about training-data dependence on the position itself.
 
-### Part 2 (model-specific, not universal): the per-position memorization cliff
+**The metric design is robust to which mechanism dominates.** The phase weight rewards "sustain quality into the endgame," which is the right thing to measure whether late plies are hard because of state-tracking drift (A) or because the positions themselves are out-of-distribution (B). Diagnostics break the mechanism out:
 
-The stronger original hypothesis was that the cumulative degradation is driven by **training-data novelty**: opening positions are memorized, endgame positions are essentially unique, models lose their crutch and fall off a cliff. To test this directly we built four position banks of increasing training-novelty (T0 hand-curated → T1 real-play extracted → T2 random-opening + Stockfish continuation → T3 pure random-vs-random) and measured per-position legality. The result is messier than the hypothesis predicted:
+- **ACPL by phase** — direct signal for mechanism A. Rising ACPL = cumulative drift.
+- **Per-position legality across novelty-tiered banks** — direct signal for mechanism B. Per-position cliff = training-novelty effect.
 
-| Model | T0 hand | T1 real-play | T2 random-open | T3 random-play |
-|---|---|---|---|---|
-| `gpt-5` | **1.000** | **1.000** | **1.000** | **1.000** |
-| `gemini-3.1-flash-lite` | 0.950 | 0.900 | 0.900 | 0.900 |
-| `claude-sonnet-4-6` | 0.750 | 0.500 | 0.750 | 0.700 |
-| `claude-opus-4-7` | 0.900 | 0.300 | 0.775 | 0.800 |
-| `deepseek-chat` | 0.500 | 0.200 | 0.200 | 0.250 |
-
-GPT-5 and Flash Lite handle progressively-more-novel positions essentially as well as memorized ones. Sonnet is similarly flat. Only DeepSeek-chat shows a sharp per-position cliff. **The "training-novelty drives failure" claim is therefore model-specific, not universal.** Sonnet illustrates the gap most cleanly: zero per-position cliff (handles novel positions fine in isolation) but a massive in-game ACPL gradient (104 → 235 from opening to middlegame). For Sonnet, what fails is *cumulative coherence across turns*, not per-position novelty.
-
-### What this means for the metric design
-
-The phase weight rewards reaching late plies regardless of which mechanism makes that hard:
-
-- For models with a per-position cliff (DeepSeek-chat, partly Opus), late plies are hard because the positions themselves drift out of training distribution.
-- For models without a per-position cliff (GPT-5, Flash Lite, Sonnet), late plies are hard because state-tracking across many turns is hard — they handle individual novel positions fine but lose coherence over a 40-ply game.
-
-Both mechanisms make "sustain quality into the endgame" the right thing to measure, and the phase weight encodes that without committing to which mechanism is doing the work. **The metric is right; the original "universal memorization cliff" framing was too strong.**
-
-That nuance is also why we report two complementary tests: the per-game composites (which capture cumulative-coherence failure across turns) and the per-position bank gradient (which catches the subset of models with per-position novelty effects). See [RESULTS § The in-game cliff is NOT explained by position novelty](RESULTS.md#the-in-game-cliff-is-not-explained-by-position-novelty) for the deep dive.
+For the data that runs both tests across the matrix and which mechanism dominates for each model, see [RESULTS § The in-game cliff is NOT explained by position novelty](RESULTS.md#the-in-game-cliff-is-not-explained-by-position-novelty).
 
 ---
 
@@ -141,7 +117,7 @@ A game ends in **forfeit** when the model cannot produce a legal move within the
 
 **A forfeit doesn't just end the game — it produces zero contribution to the score numerator from all remaining plies, while the denominator still accounts for the full max_plies.** So a forfeit at ply 5 of a 40-ply game keeps only ~6% of the achievable score; a forfeit at ply 20 keeps ~30%. Forfeits are *intentionally* counted at zero because forfeit-prone play is exactly the failure mode the benchmark exists to measure — we don't want to exclude forfeit games and report "score among games that completed," because that would hide the most important signal.
 
-**Forfeit rate is the cleanest single diagnostic in the matrix.** GPT-5 and DeepSeek-reasoner forfeited 0% of games (0 / 166 and 0 / 112 respectively); Flash Lite 5% (8 / 160); Opus 30% (48 / 160); Sonnet 20% (29 / 142); Haiku 95% (168 / 176); DeepSeek-chat 80% (137 / 172). The forfeit rate ranks models without any scoring choices — it answers the simplest possible question: "can the model produce a legal move within the retry budget, every ply, end to end?"
+The benchmark reports **forfeit rate** as a top-line diagnostic alongside the composite. It ranks models without any scoring choices — it answers the simplest possible question: "can the model produce a legal move within the retry budget, every ply, end to end?" See [RESULTS](RESULTS.md) for the forfeit rates per cell.
 
 ### Why three multiplicative factors
 
@@ -197,33 +173,35 @@ The benchmark reports both **`first_attempt_legal_rate`** (a diagnostic — frac
 
 - **`move_quality(cp_loss)`**: a legal move with cp_loss = 86 has quality = exp(−86/150) = 0.564, not 1.0. Reaching engine-level play (cp_loss ~5) requires move_quality ~0.97. Most LLMs play moves with cp_loss in the 50-200 range — competent club-player territory, scoring 0.27-0.72 per move on quality alone.
 - **`game_phase_weight(ply)`**: ply-30+ moves are weighted 3×, ply-1-9 are weighted 1×. A model that forfeits early or stops at the max-ply cap before reaching late game loses access to the highest-weighted plies in the numerator while they remain in the denominator. The structural ceiling for a model that perfectly plays only to ply 20 (out of max 40) is ~0.30; perfectly to ply 30 is ~0.59; perfectly to ply 40 is 1.0.
-- **A single full forfeit** (game ends at ply 1 because the model can't produce a legal move even after all retries) drops that game's contribution to 0 regardless of how the other games went. At N=20 games per cell, one forfeit subtracts ~0.05 from the mean — but cells with high forfeit rates (Haiku 95%, DeepSeek-chat 80%) have those zeroes dominating the mean.
+- **A single full forfeit** (game ends at ply 1 because the model can't produce a legal move even after all retries) drops that game's contribution to 0 regardless of how the other games went. At N=20 games per cell, one forfeit subtracts ~0.05 from the mean. Cells with high forfeit rates have those zeroes dominating the mean.
 
-A concrete example from the published matrix: **GPT-5 has 99.8% first-attempt-legal, 0.00 avg retries, and zero forfeits — but PlayStrength = 0.301.** Decomposing:
+A worked decomposition: a model with **100% first-attempt-legal, 0 avg retries, 0 forfeits, mean cp_loss of 85, and mean game length 26 plies** still scores PlayStrength = 0.30. Why:
 
 | Factor | Contribution |
 |---|---|
-| Mean cp_loss across legal moves: ~85 → quality = exp(−85/150) ≈ 0.57 | Caps the score around 0.57 even at perfect legality |
-| Zero forfeits across 166 games | No penalty here |
-| Games reach mean ply ~26 (vs max 40) | Misses some high-weight late plies; ~0.45 structural ceiling for typical-game-length |
-| Retry cost (0.00 retries/move) | No penalty here |
+| Mean cp_loss 85 → quality = exp(−85/150) ≈ 0.57 | Caps the score around 0.57 even at perfect legality |
+| Zero forfeits | No penalty here |
+| Mean game length 26 plies (vs max 40) | Misses high-weight late plies; structural ceiling around ~0.45 |
+| 0 avg retries | No penalty here |
 
-The 0.301 composite is the product of "perfect legality × mid-range quality × partial late-game coverage." Read the columns together — first-attempt-legal alone is not a stand-in for PlayStrength. If GPT-5 played at engine quality (cp_loss ~5), the same legality and game-length profile would score ~0.93.
+"Perfect legality × mid-range quality × partial late-game coverage" multiplies to 0.30. Read the diagnostic columns together — first-attempt-legal alone isn't a stand-in for PlayStrength. The same legality and game-length profile at engine-quality move strength (cp_loss ~5) would score ~0.93.
 
 ### Reference points
 
-| Score | Equivalent |
+What different score levels imply structurally about the model that produced them:
+
+| Score | Implication |
 |---|---|
 | 1.000 | Theoretical max — engine-quality moves across all 40 plies, zero retries |
-| 0.85-0.95 | Hypothetical: a model playing at engine-equivalent move quality |
-| 0.40-0.55 | Best current LLMs on this benchmark (vs amateur-tier Stockfish opponent) |
-| 0.25-0.40 | LLMs that survive games but play mid-range moves |
-| 0.10-0.20 | LLMs that struggle past middlegame or have meaningful forfeit rates |
-| 0.00-0.10 | High-forfeit-rate cells; the metric correctly reflects "model can't reliably complete games" |
+| 0.85–0.95 | Engine-equivalent move quality maintained across a full game |
+| 0.40–0.55 | Reaches endgame consistently; plays at competent-club quality throughout |
+| 0.25–0.40 | Completes most games but at mid-range move quality, or strong play that doesn't reach endgame |
+| 0.10–0.20 | Struggles past middlegame, or has meaningful forfeit rates |
+| 0.00–0.10 | High-forfeit-rate; the metric correctly reflects "model can't reliably complete games" |
 
 The 1.0 reference is the theoretical maximum of the metric (engine-quality moves with no retries needed across a full game) — *not* a benchmark cell. The benchmark plays models against amateur-tier opponents (skill 3 / skill 5); the engine-quality calibration is the scoring anchor, not a comparison target.
 
-Current matrix range: **0.074 (Claude Haiku) to 0.485 (Gemini 2.5 Pro)**. See [RESULTS.md](RESULTS.md) for the full matrix.
+For where actual cells land on this scale, see [RESULTS.md](RESULTS.md).
 
 ### Average Centipawn Loss (ACPL) — diagnostic
 
@@ -243,11 +221,9 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 
 **Reasonable expectations:**
 
-- LLMs on this benchmark span 0.07 to 0.49 on PlayStrength. The top two are a Google frontier reasoning model and a Google budget non-reasoning model, essentially tied. Reasoning-tier optimization is neither necessary nor sufficient for high scores.
 - The first-attempt-legal rate and forfeit-rate columns are the most diagnostic single numbers — first-legal measures the fraction of plies where the model's very first proposal (zero retries) was legal; forfeit-rate measures the fraction of games that ended because retries couldn't recover a legal move. Both read independently of scoring choices.
-- Opening positions show **0% failure rate** for every model tested. Failures concentrate on positions outside training distribution.
-- Choice of `move_quality` decay constant (τ=150) is not load-bearing: re-scoring at τ ∈ {100, 200, 300} produces identical model rankings with absolute scores shifting ~20%. See [RESULTS.md § τ sensitivity](RESULTS.md#methodology-robustness--τ-sensitivity).
-- The scoring is designed to be hill-climbable. Today's top (0.49) leaves real room above. Engine-level play would score 0.95+. The gap is the cognitive headroom.
+- The choice of `move_quality` decay constant (τ=150) is not load-bearing: re-scoring at τ ∈ {100, 200, 300} produces identical model rankings with absolute scores shifting ~20%. See [RESULTS § τ sensitivity](RESULTS.md#methodology-robustness--τ-sensitivity).
+- The scoring is designed to be hill-climbable. The top of the [0, 1] scale (~0.95+, where engine-level play would land) is unoccupied by any current cell. The gap between the matrix top and 1.0 is the cognitive headroom this benchmark exists to quantify.
 
 ---
 
