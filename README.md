@@ -1,5 +1,7 @@
 # LLM Chess Eval
 
+> **Want to see the failure mode this benchmark measures?** Watch [Levy Rozman's 2-minute short of ChatGPT vs Meta AI playing chess](https://www.youtube.com/shorts/YlMWZNx93G4) — pieces appear from nowhere, captures are claimed on empty squares, and both models confidently narrate plans for pieces no longer on the board. This benchmark scores numerically what that video shows visually.
+
 A reproducible benchmark that measures whether LLMs can maintain coherent state and apply rules across many reasoning turns, using chess as a substrate. The cognitive failure mode it isolates is **state reconstruction and 2D spatial reasoning on out-of-distribution positions** — a weakness that shows up wherever LLMs operate on structured state, not just chess.
 
 **The strongest models in the cross-family matrix score 0.48 on a [0, 1] PlayStrength scale where Stockfish self-play is the 1.0 reference.** Gemini 2.5 Pro (frontier reasoning) and Flash Lite (budget non-reasoning) are essentially tied at the top — and Flash Lite *exceeds* Pro 2.4× on MoveQuality (the supplemental move-quality metric). Frontier reasoning models from Anthropic, OpenAI, and DeepSeek cluster around 0.28–0.30, with budget cells from Anthropic and DeepSeek collapsing under 0.10 due to high forfeit rates.
