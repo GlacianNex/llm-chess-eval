@@ -5,7 +5,8 @@ A reproducible benchmark that measures whether LLMs can maintain coherent state 
 **The strongest models in the cross-family matrix score 0.48 on a [0, 1] PlayStrength scale where Stockfish self-play is the 1.0 reference.** Gemini 2.5 Pro (frontier reasoning) and Flash Lite (budget non-reasoning) are essentially tied at the top — and Flash Lite *exceeds* Pro 2.4× on PlayQuality (the supplemental move-quality metric). Frontier reasoning models from Anthropic, OpenAI, and DeepSeek cluster around 0.28–0.30, with budget cells from Anthropic and DeepSeek collapsing under 0.10 due to high forfeit rates.
 
 📊 **[RESULTS.md](RESULTS.md)** — the matrix, findings, deep dives
-📖 **[METHODOLOGY.md](METHODOLOGY.md)** — scoring formulas, methodology constraints, reproduction recipe
+📖 **[METHODOLOGY.md](METHODOLOGY.md)** — design hypothesis, scoring formulas, parameter rationale
+🛠 **[HOWTO.md](HOWTO.md)** — install, configure, run, add new providers, provider quirks
 
 ## What it measures
 
@@ -16,53 +17,42 @@ Two composite scores per model, both bounded in `[0, 1]`:
 
 Both metrics use amateur-tier Stockfish opponents — this is not a model-vs-engine comparison. The 1.0 reference on the [0, 1] scale is Stockfish self-play as a scoring anchor, not the opponent the benchmark plays against.
 
-Per-move score multiplies three factors: exponential decay over centipawn loss vs Stockfish's best, a `0.25^retries` cost on retries, and a phase weight (1 / 1.5 / 2 / 3 at ply boundaries 10 / 20 / 30) that makes late-game plies count more in the composite. The phase weight bakes the memorization-cliff thesis directly into the metric.
+Per-move score multiplies three factors: exponential decay over centipawn loss vs Stockfish's best, a `0.25^retries` cost on retries, and a phase weight (1 / 1.5 / 2 / 3 at ply boundaries 10 / 20 / 30) that makes late-game plies count more in the composite. The phase weight rewards sustained state-tracking across many turns — see [METHODOLOGY § The design hypothesis](METHODOLOGY.md#the-design-hypothesis-cumulative-coherence-and-the-model-specific-memorization-cliff) for what the data does and doesn't support about why this matters.
 
 See [METHODOLOGY.md](METHODOLOGY.md) for the full formulas and the rationale behind each factor.
 
 ## Quickstart
 
 ```powershell
-# Install
-git clone https://github.com/GlacianNex/llm-chess-eval.git
-cd llm-chess-eval
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+# Install + Stockfish 18 on PATH; configure provider keys
+git clone https://github.com/GlacianNex/llm-chess-eval.git && cd llm-chess-eval
+python -m venv .venv && .\.venv\Scripts\Activate.ps1
 pip install -e '.[all,dev]'
-
-# Stockfish required on PATH or set STOCKFISH_PATH (Stockfish 18 for reproducibility)
-
-# Configure provider keys for whichever you want to use
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
-$env:OPENAI_API_KEY    = "sk-..."
-$env:GOOGLE_API_KEY    = "AIza..."
-$env:DEEPSEEK_API_KEY  = "sk-..."
-
-# Sanity check
+$env:ANTHROPIC_API_KEY = "..."   # plus OPENAI_API_KEY / GOOGLE_API_KEY / DEEPSEEK_API_KEY as needed
 llm-chess-eval check-env
 
 # Single-model composite metrics
 llm-chess-eval play-strength --model claude-opus-4-7 --games 5
 llm-chess-eval play-quality  --model claude-opus-4-7 --games 3
 
-# Cross-provider 8-cell matrix (frontier + budget for 4 providers)
+# Cross-provider matrix
 llm-chess-eval benchmark --dry-run    # preview cells without invoking models
-llm-chess-eval benchmark              # runs all 8 cells
+llm-chess-eval benchmark
 ```
+
+Full install steps, provider quirks, and "how to add a provider" recipe are in **[HOWTO.md](HOWTO.md)**.
 
 ## Why this is useful
 
 Public benchmarks measure knowledge (MMLU, GPQA) or single-shot problem solving (MATH, HumanEval). Neither isolates whether a model maintains coherent state and applies known rules across many reasoning steps. That's the cognitive dimension that determines whether you can trust a model on long agentic tasks.
 
-Chess is the perfect probe because the first 5-10 moves of nearly every game are saturated with training data (memorization works), while mid-game and endgame positions are essentially unique (only reasoning works). The eval measures what's left when memory runs out.
+Chess is the right probe because the first 5–10 moves of nearly every game are saturated with training data while mid-game and endgame positions drift into territory the model hasn't seen — *and* state has to be tracked across many independent stateless API calls, which exposes coherence failures that single-shot evals can't see.
 
 Two clean ground-truth oracles — `python-chess` for rule-checking and Stockfish for move-quality scoring — make the test fully reproducible and deterministic against a fixed engine version.
 
 ## Multi-provider support
 
-Adapters and routing for Anthropic (Claude), OpenAI (GPT), Google (Gemini), DeepSeek, and OpenAI-API-compatible endpoints (Together / Groq / vLLM / Ollama). New providers are easy to add — implement one `propose_move(fen) -> CallOutcome` method against the shared schema in `adapters/_shared.py`.
-
-See [METHODOLOGY.md § Adding a new provider](METHODOLOGY.md#adding-a-new-provider) for the recipe.
+Adapters and routing for Anthropic (Claude), OpenAI (GPT), Google (Gemini), DeepSeek, and OpenAI-API-compatible endpoints (Together / Groq / vLLM / Ollama). New providers are easy to add — see [HOWTO § Adding a new provider](HOWTO.md#adding-a-new-provider).
 
 ## License
 

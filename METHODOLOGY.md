@@ -1,6 +1,6 @@
 # LLM Chess Eval — Methodology
 
-How the benchmark measures what it measures: scoring formulas, design rationale, methodology constraints encountered, reproduction recipe, and code structure. For the matrix, findings, and deep dives, see **[RESULTS.md](RESULTS.md)**.
+How the benchmark measures what it measures: the design hypothesis, scoring formulas, parameter choices, and what each diagnostic captures. For how to install and run the eval, see **[HOWTO.md](HOWTO.md)**. For the matrix and findings, see **[RESULTS.md](RESULTS.md)**.
 
 ---
 
@@ -21,35 +21,48 @@ The benchmark runs across any provider (Anthropic, OpenAI, Google, DeepSeek, Ope
 
 ---
 
-## The memorization cliff hypothesis
+## The design hypothesis: cumulative coherence and the (model-specific) memorization cliff
 
-The benchmark's design rests on one specific claim about how LLMs learn chess: **chess pattern-matching is dense early in the game and sparse late, and the transition from "recognize the position" to "infer from rules" happens roughly between ply 10 and 30.** Everything downstream — the phase weight, the multi-bank novelty tests, even the choice of game-play (rather than puzzle-solving) as the evaluation format — follows from this hypothesis.
+The benchmark was designed around one specific claim about how LLMs play chess: **performance degrades across a game's length, not because positions get harder in absolute terms, but because the model has to sustain coherent state-tracking turn after turn.** The phase weight in the metric encodes this. The hypothesis came in two parts originally; the data supports one cleanly, the other only partially.
 
-### Why a cliff should exist
+### Part 1 (supported): cumulative-coherence failure across turns
 
-Chess has ~10^120 distinct legal positions. The set of positions appearing more than once in any training corpus is vastly smaller — perhaps 10^7–10^9 across all PGN databases, opening books, books, chess sites, and blog posts a frontier LLM might see. The structure of that distribution is heavily lopsided across game phase:
+What the data shows: **most models that survive to all three phases of a game play progressively worse moves as the game proceeds.** ACPL by phase from the matrix:
 
-- **Opening (plies 1–10):** Roughly 5,000 named openings, all heavily documented. The first 5–10 moves of any normal game appear thousands to millions of times in training data. Strong move output is achievable through pure pattern recall.
-- **Early middlegame (plies 10–20):** Branching combinatorics push positions into rarer territory, but standard pawn structures and piece configurations are still well-represented. Heuristics like "knight outposts are good" or "control the center" extracted from text still carry the model.
-- **Middlegame (plies 20–30):** Positions are typically unique in training data — but the *patterns* (forks, pins, weak squares, broken kingside) still appear in chess literature. Pattern recognition partially carries the model.
-- **Endgame (plies 30+):** Both positions and the specific reasoning patterns required (king-and-pawn endings, exact mate calculations) are sparsely represented in unstructured training corpora. The model must reason from rules + first-principles geometry. **This is where the cliff bites.**
+| Model | opening | middlegame | endgame |
+|---|---|---|---|
+| `gemini-2.5-pro` | 34 | 78 | 168 |
+| `gemini-3.1-flash-lite` | 45 | 77 | 114 |
+| `claude-opus-4-7` | 66 | 103 | 123 |
+| `gpt-5` | 85 | 111 | 102 |
+| `deepseek-reasoner` | 85 | 172 | 118 |
 
-### What "cliff" means specifically
+Every cell that reaches the endgame shows the gradient, with one exception: GPT-5 is roughly flat across phases (consistently mid-quality everywhere). For weaker cells that never reach the endgame at all (Haiku, DeepSeek-chat — 80–95% forfeit rate), the cumulative-coherence claim is supported even more starkly: they can't survive long enough *for* the cliff to bite. The phase weight in the metric (1 / 1.5 / 2 / 3) is justified primarily by this: surviving to ply 30+ with maintained quality is harder than playing ply 5 well, and the metric should reward it.
 
-It's not a discrete failure point. The cliff is statistical:
+### Part 2 (model-specific, not universal): the per-position memorization cliff
 
-- The probability that the current position **appears verbatim in training** approaches zero past ply ~20.
-- The probability of a **near-isomorphic relative in training** decays smoothly through middlegame.
-- Models that pattern-match without genuine state-tracking show **systematically worsening move quality (rising ACPL) and rising illegal-move rates** as the game progresses — a gradient, not a step function.
-- Models that *do* track state should show flat or only mildly worsening behavior across phases.
+The stronger original hypothesis was that the cumulative degradation is driven by **training-data novelty**: opening positions are memorized, endgame positions are essentially unique, models lose their crutch and fall off a cliff. To test this directly we built four position banks of increasing training-novelty (T0 hand-curated → T1 real-play extracted → T2 random-opening + Stockfish continuation → T3 pure random-vs-random) and measured per-position legality. The result is messier than the hypothesis predicted:
 
-### How the metric encodes the hypothesis
+| Model | T0 hand | T1 real-play | T2 random-open | T3 random-play |
+|---|---|---|---|---|
+| `gpt-5` | **1.000** | **1.000** | **1.000** | **1.000** |
+| `gemini-3.1-flash-lite` | 0.950 | 0.900 | 0.900 | 0.900 |
+| `claude-sonnet-4-6` | 0.750 | 0.500 | 0.750 | 0.700 |
+| `claude-opus-4-7` | 0.900 | 0.300 | 0.775 | 0.800 |
+| `deepseek-chat` | 0.500 | 0.200 | 0.200 | 0.250 |
 
-The `game_phase_weight(ply) = 1 / 1.5 / 2 / 3` bakes the cliff directly into the score: a model that plays the opening perfectly but breaks down by ply 15 loses access to the high-weight late plies and is structurally capped around 0.20–0.30. A model that maintains quality through ply 40 captures the full 3× weight of the endgame phase. The composite asks "can you sustain quality across the cliff?" — not "are you strong in any single phase?"
+GPT-5 and Flash Lite handle progressively-more-novel positions essentially as well as memorized ones. Sonnet is similarly flat. Only DeepSeek-chat shows a sharp per-position cliff. **The "training-novelty drives failure" claim is therefore model-specific, not universal.** Sonnet illustrates the gap most cleanly: zero per-position cliff (handles novel positions fine in isolation) but a massive in-game ACPL gradient (104 → 235 from opening to middlegame). For Sonnet, what fails is *cumulative coherence across turns*, not per-position novelty.
 
-### How we test the hypothesis directly
+### What this means for the metric design
 
-The phase weighting is one piece of evidence; the [5-model × 4-bank comparison in RESULTS](RESULTS.md#bank-comparison-details-5-models--4-banks) is the other. We constructed four position banks of increasing training-novelty (T0 hand-curated → T1 real-play extracted → T2 random-opening + Stockfish continuation → T3 pure random-vs-random) and measured per-position legality. **The cliff turns out to be model-specific:** GPT-5, Flash Lite, and Sonnet handle novel positions essentially as well as memorized ones; Opus has a modest cliff; DeepSeek-chat collapses. This nuance — that the cliff is real but not universal — is why we report both per-game composites (which capture cumulative-coherence failure) and per-position banks (which capture novelty-specific failure) separately.
+The phase weight rewards reaching late plies regardless of which mechanism makes that hard:
+
+- For models with a per-position cliff (DeepSeek-chat, partly Opus), late plies are hard because the positions themselves drift out of training distribution.
+- For models without a per-position cliff (GPT-5, Flash Lite, Sonnet), late plies are hard because state-tracking across many turns is hard — they handle individual novel positions fine but lose coherence over a 40-ply game.
+
+Both mechanisms make "sustain quality into the endgame" the right thing to measure, and the phase weight encodes that without committing to which mechanism is doing the work. **The metric is right; the original "universal memorization cliff" framing was too strong.**
+
+That nuance is also why we report two complementary tests: the per-game composites (which capture cumulative-coherence failure across turns) and the per-position bank gradient (which catches the subset of models with per-position novelty effects). See [RESULTS § The in-game cliff is NOT explained by position novelty](RESULTS.md#the-in-game-cliff-is-not-explained-by-position-novelty) for the deep dive.
 
 ---
 
@@ -75,7 +88,7 @@ Where:
 
 - **`retry_cost(retries) = 0.25 ^ retries`** — steep multiplicative penalty for needing the retry safety net. One retry costs 75% of the move's value; two retries cost 94%. In a real chess game, an illegal move is fatal; the benchmark is a generosity-graded approximation, and the 0.25 base ensures retried moves contribute almost nothing to the score.
 
-- **`game_phase_weight(ply) = 1 / 1.5 / 2 / 3`** — softened weighting by ply bucket (boundaries at ply 10, 20, 30). Opening positions are saturated in training data (weight 1); mid-game progressively novel (weights 1.5, 2); endgame essentially unique from training (weight 3). The shape encodes the memorization-cliff thesis into the metric (reaching ply 30 is worth 3× more than playing ply 5 perfectly) without making the denominator dominated by late plies — earlier iterations used 1/2/4/8 but that compressed scores too aggressively for models that broke down in middlegame.
+- **`game_phase_weight(ply) = 1 / 1.5 / 2 / 3`** — softened weighting by ply bucket (boundaries at ply 10, 20, 30). Late plies are weighted more because reaching them with maintained quality requires sustained state-tracking — see [the design hypothesis](#the-design-hypothesis-cumulative-coherence-and-the-model-specific-memorization-cliff) for what the data does and doesn't support. The shape makes "reaching ply 30 with maintained quality" worth 3× more than "playing ply 5 perfectly" without letting the denominator be dominated by late plies — earlier iterations used 1/2/4/8 but that compressed scores too aggressively for models that broke down in middlegame.
 
 Per-game score:
 
@@ -214,7 +227,7 @@ Current matrix range: **0.074 (Claude Haiku) to 0.485 (Gemini 2.5 Pro)**. See [R
 
 ### Average Centipawn Loss (ACPL) — diagnostic
 
-ACPL is the standard chess-strength metric: per move, the centipawn difference between Stockfish's top move and what the model played. ACPL 50 = strong club player; ACPL 150 = intermediate; ACPL 500+ = blundering. We report ACPL **by phase** (opening / middlegame / endgame) alongside the composite scores. The ACPL gradient across phases is the most direct evidence of the memorization cliff.
+ACPL is the standard chess-strength metric: per move, the centipawn difference between Stockfish's top move and what the model played. ACPL 50 = strong club player; ACPL 150 = intermediate; ACPL 500+ = blundering. We report ACPL **by phase** (opening / middlegame / endgame) alongside the composite scores. The ACPL gradient across phases is the most direct evidence of cumulative-coherence failure — the metric the composite encodes structurally, broken out so you can see which phase a model degrades in.
 
 ---
 
@@ -238,79 +251,6 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 
 ---
 
-## How to reproduce
-
-```powershell
-# Install
-git clone https://github.com/GlacianNex/llm-chess-eval.git
-cd llm-chess-eval
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e '.[all,dev]'
-
-# Stockfish required on PATH or STOCKFISH_PATH env var (use Stockfish 18 for reproducibility)
-
-# Provider keys for whichever you want
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
-$env:OPENAI_API_KEY    = "sk-..."
-$env:GOOGLE_API_KEY    = "AIza..."
-$env:DEEPSEEK_API_KEY  = "sk-..."
-
-# Sanity check
-llm-chess-eval check-env
-
-# Single-model composite metrics
-llm-chess-eval play-strength --model claude-opus-4-7 --games 5
-llm-chess-eval play-quality  --model claude-opus-4-7 --games 3
-
-# Full cross-provider matrix
-llm-chess-eval benchmark --dry-run    # preview cells without invoking models
-llm-chess-eval benchmark
-
-# Component evals for diagnostic depth
-llm-chess-eval legality    --model claude-opus-4-7
-llm-chess-eval consistency --model claude-opus-4-7
-
-# Re-score existing runs with the canonical formula (no model invocations)
-python scripts/matrix_with_retry_context.py
-```
-
-### Repository layout
-
-```
-src/llm_chess_eval/
-  adapters/
-    _shared.py                # SYSTEM_PROMPT, SUBMIT_MOVE_PARAMETERS, build_user_message
-    base.py                   # ModelAdapter protocol
-    claude.py / openai.py / gemini.py / openai_compat.py / factory.py
-  evals/
-    legality.py / consistency.py
-    games.py                  # game loop (forfeit/substitute/retry) + per-move progress logging
-    play_strength.py          # PlayStrength metric — canonical scoring (primary)
-    play_quality.py           # PlayQuality metric — canonical scoring (supplemental)
-  analytics/
-    accumulation.py           # per-move error rate, survival curves
-    illegal_taxonomy.py       # classifies why each illegal move failed
-    report.py                 # auto-generated scorecard
-  harness/
-    runner.py / game_runner.py
-  cli.py / config.py / types.py
-
-data/positions/legality_v1.jsonl   # 20-position bank
-runs/<timestamp>__<eval>__<model>/ # raw JSONL output of each run
-scripts/                            # analysis + monitor helpers
-```
-
-### Adding a new provider
-
-1. Implement an adapter in `src/llm_chess_eval/adapters/` exposing `propose_move(fen, prior_failed=None, augment_legal_moves=None, reasoning_effort_override=None) -> CallOutcome` (the `ModelAdapter` protocol in `adapters/base.py`).
-2. Reuse the shared prompt/schema/parsing helpers in `_shared.py`. Wrap them in the provider's tool-call shape.
-3. Register the provider in `provider_for_model()` and `KNOWN_MODELS` in `config.py`, and in `build_adapter()` in `adapters/factory.py`.
-
-For OpenAI-API-compatible endpoints (Together, Groq, Ollama, vLLM, custom servers), reuse `OpenAICompatibleAdapter` in `adapters/openai_compat.py` with the right `base_url` and `api_key_env_var` — no new adapter file needed.
-
----
-
 ## Open questions
 
 What would tighten the findings:
@@ -324,18 +264,4 @@ What would tighten the findings:
 
 ---
 
-## Things to be aware of
-
-A few provider-specific behaviors to keep in mind when running this benchmark on reasoning-tier models. These aren't findings — just things that affect how the harness interacts with the APIs.
-
-**`max_tokens` semantics differ by provider.** OpenAI's `max_completion_tokens` and Google's `max_output_tokens` cap reasoning + visible output combined. A reasoning model can spend its entire budget reasoning and have zero tokens left for the tool call, returning `finish_reason='length'`. Anthropic's `max_tokens` counts output only; thinking is on a separate budget. The benchmark defaults to 65536 for reasoning-capable providers (8192 for Anthropic, since the SDK refuses non-streaming calls above that). Set the ceiling lower at your own risk; audit run JSONLs for `did not call submit_move` entries to spot budget issues.
-
-**Gemini has a second tool-output failure: `MALFORMED_FUNCTION_CALL`.** When reasoning runs long enough to corrupt the structured output without quite hitting the length cap, Gemini reports this finish_reason instead. The harness's reasoning-effort fallback ladder triggers on both — when an attempt hits either failure mode, the next retry on that move drops effort one notch (`default → medium → low → minimal`). The fallback activates only after the model demonstrates it can't fit at the current effort.
-
-**Gemini Pro Preview has a 250-request-per-day cap** regardless of paid tier. Only GA models (e.g., `gemini-2.5-pro`) have unrestricted per-tier quotas. A PlayStrength + PlayQuality gauntlet on a reasoning-heavy model with retries can burn 300-400 requests, so the cap is binding. The benchmark uses `gemini-2.5-pro` for the published frontier-Google cell.
-
-**Per-call `reasoning_effort_for_this_attempt` is logged** in `progress.jsonl` so you can audit which calls used reduced reasoning vs the model's default.
-
----
-
-For the matrix, findings, deep dives, and the Anthropic-score explanation, see **[RESULTS.md](RESULTS.md)**.
+For the matrix, findings, deep dives, and the Anthropic-score explanation, see **[RESULTS.md](RESULTS.md)**. For provider quirks and how to run the eval, see **[HOWTO.md](HOWTO.md)**.
