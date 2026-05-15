@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "llm-chess-eval"
 version = "0.1.0"
-description = "Chess-based evaluation of LLM logical thinking (legality, consistency, puzzles, ELO)"
+description = "Chess-based benchmark measuring whether LLMs can maintain coherent state and apply rules across many reasoning turns (PlayStrength + MoveQuality metrics)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
