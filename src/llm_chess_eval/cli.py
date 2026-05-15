@@ -164,7 +164,7 @@ def cmd_play_strength(games_jsonl: tuple[Path, ...], model: str | None, n_games:
                f"[bold]{result['play_strength']:.3f}[/bold]")
 
 
-@main.command("play-quality")
+@main.command("move-quality")
 @click.option("--games-jsonl", type=click.Path(path_type=Path), multiple=True, required=False,
               help="Path(s) to games.jsonl from retry-mode runs. If omitted, runs fresh.")
 @click.option("--model", type=str, default=None,
@@ -174,23 +174,23 @@ def cmd_play_strength(games_jsonl: tuple[Path, ...], model: str | None, n_games:
 @click.option("--sf-depth", type=int, default=12, help="Stockfish search depth.")
 @click.option("--max-plies", type=int, default=60, help="Cap on LLM moves per game (longer to reach endgame).")
 @click.option("--max-retries", type=int, default=3, help="Retry attempts per move before forfeit.")
-def cmd_play_quality(games_jsonl: tuple[Path, ...], model: str | None, n_games: int,
+def cmd_move_quality(games_jsonl: tuple[Path, ...], model: str | None, n_games: int,
                      skill: int, sf_depth: int, max_plies: int, max_retries: int) -> None:
-    """Compute PlayQuality score: supplemental move-quality metric.
+    """Compute MoveQuality score: supplemental move-quality metric.
 
     Strips the retry_cost factor from PlayStrength and runs against a harder
     Stockfish opponent. Answers: "given a legal move was found, how good was it?"
     """
     from .evals.play_strength import load_games
-    from .evals.play_quality import play_quality
+    from .evals.move_quality import move_quality
 
     if games_jsonl:
         for path in games_jsonl:
             games = load_games(path)
-            result = play_quality(games, max_plies=max_plies)
+            result = move_quality(games, max_plies=max_plies)
             mdl = games[0].model if games else "?"
             click.echo(f"\n{path.parent.name}  [{mdl}]")
-            click.echo(f"  PlayQuality:            {result['play_quality']:.3f}")
+            click.echo(f"  MoveQuality:            {result['move_quality']:.3f}")
             click.echo(f"  mean survival:          {result['mean_survival']:.3f}  "
                        f"({result['mean_plies_legal']:.1f}/{max_plies} legal moves)")
             click.echo(f"  mean quality:           {result['quality_component_mean']:.3f}")
@@ -221,10 +221,10 @@ def cmd_play_quality(games_jsonl: tuple[Path, ...], model: str | None, n_games: 
         max_retries=max_retries,
         console=Console(),
     )
-    result = play_quality(records, max_plies=max_plies)
+    result = move_quality(records, max_plies=max_plies)
     click.echo("")
-    click.echo(f"PlayQuality ({model}, skill {skill}, {n_games} games, retry mode): "
-               f"{result['play_quality']:.3f}")
+    click.echo(f"MoveQuality ({model}, skill {skill}, {n_games} games, retry mode): "
+               f"{result['move_quality']:.3f}")
     click.echo(f"  survival={result['mean_survival']:.3f} ({result['mean_plies_legal']:.1f}/{max_plies} moves), "
                f"quality={result['quality_component_mean']:.3f}, "
                f"ACPL={result['acpl_overall']:.0f} cp "
@@ -238,26 +238,26 @@ def cmd_play_quality(games_jsonl: tuple[Path, ...], model: str | None, n_games: 
 @click.option("--provider", type=click.Choice(list(BENCHMARK_MATRIX.keys()) + ["all"]), default="all",
               help="Filter to a single provider, or 'all'.")
 @click.option("--ps-games", type=int, default=5, help="N games per model for PlayStrength.")
-@click.option("--pq-games", type=int, default=3, help="N games per model for PlayQuality.")
+@click.option("--mq-games", type=int, default=3, help="N games per model for MoveQuality.")
 @click.option("--ps-skill", type=int, default=3, help="Stockfish skill for PlayStrength.")
-@click.option("--pq-skill", type=int, default=5, help="Stockfish skill for PlayQuality.")
+@click.option("--mq-skill", type=int, default=5, help="Stockfish skill for MoveQuality.")
 @click.option("--ps-max-plies", type=int, default=40)
-@click.option("--pq-max-plies", type=int, default=60)
+@click.option("--mq-max-plies", type=int, default=60)
 @click.option("--ps-max-retries", type=int, default=10,
               help="Retry budget for PlayStrength. Each retry costs 0.25^n on per-move score.")
-@click.option("--pq-max-retries", type=int, default=3,
-              help="Retry budget for PlayQuality. Retries do not penalize per-move quality.")
+@click.option("--mq-max-retries", type=int, default=3,
+              help="Retry budget for MoveQuality. Retries do not penalize per-move quality.")
 @click.option("--dry-run", is_flag=True, help="Print the planned model set and exit.")
-def cmd_benchmark(tier: str, provider: str, ps_games: int, pq_games: int,
-                  ps_skill: int, pq_skill: int, ps_max_plies: int, pq_max_plies: int,
-                  ps_max_retries: int, pq_max_retries: int, dry_run: bool) -> None:
-    """Run PlayStrength (primary) + PlayQuality (supplemental) for every model in the matrix.
+def cmd_benchmark(tier: str, provider: str, ps_games: int, mq_games: int,
+                  ps_skill: int, mq_skill: int, ps_max_plies: int, mq_max_plies: int,
+                  ps_max_retries: int, mq_max_retries: int, dry_run: bool) -> None:
+    """Run PlayStrength (primary) + MoveQuality (supplemental) for every model in the matrix.
 
     The matrix is (provider × tier): four providers × {frontier, budget}.
     Edit BENCHMARK_MATRIX in config.py to change which models populate each cell.
     """
     from .evals.play_strength import play_strength
-    from .evals.play_quality import play_quality
+    from .evals.move_quality import move_quality
     from .harness.game_runner import run_games
 
     # Resolve the model set
@@ -275,7 +275,7 @@ def cmd_benchmark(tier: str, provider: str, ps_games: int, pq_games: int,
         console.print(f"  {p:<10} {t:<8} {m}")
     console.print(f"  total: {len(selected)} models")
     console.print(f"  PlayStrength config: {ps_games} games, skill {ps_skill}, max_plies {ps_max_plies}, mode=retry, max_retries {ps_max_retries} (0.25^n per-retry cost)")
-    console.print(f"  PlayQuality  config: {pq_games} games, skill {pq_skill}, max_plies {pq_max_plies}, mode=retry, max_retries {pq_max_retries} (no per-retry cost)")
+    console.print(f"  MoveQuality  config: {mq_games} games, skill {mq_skill}, max_plies {mq_max_plies}, mode=retry, max_retries {mq_max_retries} (no per-retry cost)")
 
     if dry_run:
         return
@@ -292,22 +292,22 @@ def cmd_benchmark(tier: str, provider: str, ps_games: int, pq_games: int,
             )
             ps = play_strength(ps_records, max_plies=ps_max_plies)
 
-            adapter_pq = build_adapter(model=model)
-            _, pq_records = run_games(
-                adapter=adapter_pq, n_games=pq_games, skill=pq_skill,
-                sf_depth=12, max_plies=pq_max_plies,
-                color="alternating", mode="retry", max_retries=pq_max_retries, console=console,
+            adapter_mq = build_adapter(model=model)
+            _, mq_records = run_games(
+                adapter=adapter_mq, n_games=mq_games, skill=mq_skill,
+                sf_depth=12, max_plies=mq_max_plies,
+                color="alternating", mode="retry", max_retries=mq_max_retries, console=console,
             )
-            pq = play_quality(pq_records, max_plies=pq_max_plies)
+            mq = move_quality(mq_records, max_plies=mq_max_plies)
 
             results.append({
                 "provider": p, "tier": t, "model": model,
                 "PS": ps["play_strength"],
-                "PQ": pq["play_quality"],
-                "ACPL_overall": pq["acpl_overall"],
-                "ACPL_opening": pq["acpl_opening"],
-                "ACPL_middlegame": pq["acpl_middlegame"],
-                "ACPL_endgame": pq["acpl_endgame"],
+                "MQ": mq["move_quality"],
+                "ACPL_overall": mq["acpl_overall"],
+                "ACPL_opening": mq["acpl_opening"],
+                "ACPL_middlegame": mq["acpl_middlegame"],
+                "ACPL_endgame": mq["acpl_endgame"],
             })
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]Failed on {model}: {type(e).__name__}: {e}[/red]")
@@ -317,14 +317,14 @@ def cmd_benchmark(tier: str, provider: str, ps_games: int, pq_games: int,
 
     # Print matrix summary
     console.rule("Benchmark matrix results")
-    console.print(f"{'provider':<10} {'tier':<10} {'model':<55} {'PS':>5} {'PQ':>5} {'ACPL_op':>7} {'ACPL_mid':>8} {'ACPL_end':>8}")
+    console.print(f"{'provider':<10} {'tier':<10} {'model':<55} {'PS':>5} {'MQ':>5} {'ACPL_op':>7} {'ACPL_mid':>8} {'ACPL_end':>8}")
     for r in results:
         if "error" in r:
             console.print(f"{r['provider']:<10} {r['tier']:<10} {r['model']:<55} [red]ERR: {r['error'][:40]}[/red]")
         else:
             console.print(
                 f"{r['provider']:<10} {r['tier']:<10} {r['model']:<55} "
-                f"{r['PS']:>5.3f} {r['PQ']:>5.3f} {r['ACPL_opening']:>7.0f} "
+                f"{r['PS']:>5.3f} {r['MQ']:>5.3f} {r['ACPL_opening']:>7.0f} "
                 f"{r['ACPL_middlegame']:>8.0f} {r['ACPL_endgame']:>8.0f}"
             )
 

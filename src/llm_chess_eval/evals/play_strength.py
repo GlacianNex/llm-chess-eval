@@ -49,7 +49,7 @@ The metric is bounded [0, 1]; Stockfish self-play would score 1.0. Existing
 games.jsonl data does not need re-collection when this scoring is updated —
 only re-scoring.
 
-A supplemental metric `PlayQuality` (see play_quality.py) removes the
+A supplemental metric `MoveQuality` (see `move_quality.py`) removes the
 retry_cost factor — useful for asking "how good are the moves themselves
 once a legal one is found?" — but PlayStrength is the headline composite.
 """

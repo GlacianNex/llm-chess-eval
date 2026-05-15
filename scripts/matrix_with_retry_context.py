@@ -100,7 +100,7 @@ def main() -> None:
     for model in args.models:
         for kind_label, skill, max_plies, kind_key in [
             ("PlayStrength", 3, 40, "PS"),
-            ("PlayQuality", 5, 60, "PQ"),
+            ("MoveQuality", 5, 60, "MQ"),
         ]:
             run = find_latest_run(model, skill)
             if not run:

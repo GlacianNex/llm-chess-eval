@@ -40,7 +40,7 @@ llm-chess-eval check-env
 ```powershell
 # Single-model composite metrics
 llm-chess-eval play-strength --model claude-opus-4-7 --games 5
-llm-chess-eval play-quality  --model claude-opus-4-7 --games 3
+llm-chess-eval move-quality  --model claude-opus-4-7 --games 3
 
 # Full cross-provider matrix
 llm-chess-eval benchmark --dry-run    # preview cells without invoking models
@@ -68,7 +68,7 @@ src/llm_chess_eval/
     legality.py / consistency.py
     games.py                  # game loop (forfeit/substitute/retry) + per-move progress logging
     play_strength.py          # PlayStrength metric — canonical scoring (primary)
-    play_quality.py           # PlayQuality metric — canonical scoring (supplemental)
+    move_quality.py           # MoveQuality metric — canonical scoring (supplemental)
   analytics/
     accumulation.py           # per-move error rate, survival curves
     illegal_taxonomy.py       # classifies why each illegal move failed
@@ -100,7 +100,7 @@ These aren't findings about the models — just operational behaviors that affec
 
 **Gemini has a second tool-output failure mode: `MALFORMED_FUNCTION_CALL`.** When reasoning runs long enough to corrupt the structured output without quite hitting the length cap, Gemini reports this `finish_reason` instead. The harness's reasoning-effort fallback ladder triggers on both — when an attempt hits either failure mode, the next retry on that move drops effort one notch (`default → medium → low → minimal`). The fallback activates only after the model demonstrates it can't fit at the current effort.
 
-**Gemini Pro Preview has a 250-request-per-day cap** regardless of paid tier. Only GA models (e.g., `gemini-2.5-pro`) have unrestricted per-tier quotas. A PlayStrength + PlayQuality gauntlet on a reasoning-heavy model with retries can burn 300–400 requests, so the cap is binding. The benchmark uses `gemini-2.5-pro` for the published frontier-Google cell.
+**Gemini Pro Preview has a 250-request-per-day cap** regardless of paid tier. Only GA models (e.g., `gemini-2.5-pro`) have unrestricted per-tier quotas. A PlayStrength + MoveQuality gauntlet on a reasoning-heavy model with retries can burn 300–400 requests, so the cap is binding. The benchmark uses `gemini-2.5-pro` for the published frontier-Google cell.
 
 **Per-call `reasoning_effort_for_this_attempt` is logged** in `progress.jsonl` so you can audit which calls used reduced reasoning vs the model's default.
 

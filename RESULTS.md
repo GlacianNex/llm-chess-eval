@@ -16,9 +16,9 @@ The matrix below ranks models on this primitive. A model's score here doesn't pr
 
 ## The matrix
 
-Nine cells: frontier and budget tier across four providers, plus Sonnet as Anthropic mid-tier. Each cell ran 20+ PlayStrength games and 10+ PlayQuality games (most ran much more — see N column). Sorted by PlayStrength.
+Nine cells: frontier and budget tier across four providers, plus Sonnet as Anthropic mid-tier. Each cell ran 20+ PlayStrength games and 10+ MoveQuality games (most ran much more — see N column). Sorted by PlayStrength.
 
-| Provider | Tier | Model | PlayStrength | PlayQuality | first-legal | avg retries | forfeit rate | N (PS/PQ) |
+| Provider | Tier | Model | PlayStrength | MoveQuality | first-legal | avg retries | forfeit rate | N (PS/MQ) |
 |---|---|---|---|---|---|---|---|---|
 | Google | frontier | `gemini-2.5-pro` | **0.485** | 0.192 | 93.2% | 0.10 | 0% | 160/88 |
 | Google | budget | `gemini-3.1-flash-lite` | 0.477 | **0.466** | 86.5% | 0.20 | 5% | 160/80 |
@@ -30,7 +30,7 @@ Nine cells: frontier and budget tier across four providers, plus Sonnet as Anthr
 | DeepSeek | budget | `deepseek-chat` | 0.097 [*ᵇ*](#footnote-b) | 0.046 [*ᵇ*](#footnote-b) | 33.9% | 2.29 | 80% | 172/80 |
 | Anthropic | budget | `claude-haiku-4-5-20251001` | 0.074 [*ᵇ*](#footnote-b) | 0.053 [*ᵇ*](#footnote-b) | 42.9% | 1.95 | 95% | 176/80 |
 
-Two scores per model, both bounded `[0, 1]`. **PlayStrength** is the headline composite — it multiplies move quality, retry-cost discipline (`0.25^retries`), and a phase weight that counts late-game plies more, across full games vs Stockfish skill 3 (~1500 ELO amateur). **PlayQuality** is the supplemental — it strips the retry-cost factor and runs against a harder Stockfish (skill 5, ~1700 ELO) so you can isolate "how good are the moves themselves" from "how often does the model find a legal move on first try." Stockfish self-play would score 1.0; the published PlayStrength top is 0.485. Diagnostic columns: **first-legal** = fraction of plies where the model's first proposal was legal (zero retries); **avg retries** = total retries across all plies divided by total plies; **forfeit rate** = fraction of games that ended because the model couldn't produce a legal move within 10 retries. Full formulas in [METHODOLOGY.md](METHODOLOGY.md).
+Two scores per model, both bounded `[0, 1]`. **PlayStrength** is the headline composite — it multiplies move quality, retry-cost discipline (`0.25^retries`), and a phase weight that counts late-game plies more, across full games vs Stockfish skill 3 (~1500 ELO amateur). **MoveQuality** is the supplemental — it strips the retry-cost factor and runs against a harder Stockfish (skill 5, ~1700 ELO) so you can isolate "how good are the moves themselves" from "how often does the model find a legal move on first try." Stockfish self-play would score 1.0; the published PlayStrength top is 0.485. Diagnostic columns: **first-legal** = fraction of plies where the model's first proposal was legal (zero retries); **avg retries** = total retries across all plies divided by total plies; **forfeit rate** = fraction of games that ended because the model couldn't produce a legal move within 10 retries. Full formulas in [METHODOLOGY.md](METHODOLOGY.md).
 
 ### Reading the matrix
 
@@ -68,7 +68,7 @@ The choice of τ=150 isn't load-bearing on any conclusion — pick τ=100 or τ=
 
 ## A note on the Anthropic scores
 
-Anthropic's scores are the lowest among the four providers on both PlayStrength and PlayQuality, except for Opus which is now competitive with mid-pack OpenAI/DeepSeek frontier cells. This deserves explanation because the picture is easy to misread.
+Anthropic's scores are the lowest among the four providers on both PlayStrength and MoveQuality, except for Opus which is now competitive with mid-pack OpenAI/DeepSeek frontier cells. This deserves explanation because the picture is easy to misread.
 
 **Anthropic's numbers are not artifacts of methodology.** During the benchmark build, OpenAI's `max_completion_tokens` and Google's `max_output_tokens` were initially set too low (2048) — both providers count reasoning + visible output in that budget, so reasoning models hit the cap before emitting the tool call. We discovered this, raised the budget to 65536, and re-ran the matrix. Anthropic was unaffected throughout: `max_tokens` on Anthropic counts output tokens only, with extended thinking on a separate budget. Anthropic was also capped at 8192 (vs 65536 for other providers) because Anthropic's SDK refuses non-streaming calls above that — but that ceiling is on *visible output*, not reasoning, and Anthropic's models comfortably emit their tool calls within it. The Anthropic numbers reflect genuine model behavior at full reasoning budgets.
 
@@ -114,7 +114,7 @@ Three things compound across a 30–40 ply game that single-position tests don't
 
 ### The Flash Lite outlier — why a budget non-reasoning model nearly tops the matrix
 
-Flash Lite is the single most surprising cell. It's a budget non-reasoning model from Google that essentially **ties** the frontier reasoning model from the same family on PlayStrength (0.477 vs Gemini 2.5 Pro's 0.485) and **dominates** every other cell on PlayQuality (0.466 vs the next-best at 0.237). And it does this *despite* being demonstrably worse on rule-following than the top OpenAI cell:
+Flash Lite is the single most surprising cell. It's a budget non-reasoning model from Google that essentially **ties** the frontier reasoning model from the same family on PlayStrength (0.477 vs Gemini 2.5 Pro's 0.485) and **dominates** every other cell on MoveQuality (0.466 vs the next-best at 0.237). And it does this *despite* being demonstrably worse on rule-following than the top OpenAI cell:
 
 | | Flash Lite | GPT-5 |
 |---|---|---|
@@ -122,13 +122,13 @@ Flash Lite is the single most surprising cell. It's a budget non-reasoning model
 | avg retries / move | 0.20 | **0.00** |
 | forfeit rate | 5% (8/160) | **0% (0/166)** |
 | PlayStrength | **0.477** | 0.301 |
-| PlayQuality | **0.466** | 0.237 |
+| MoveQuality | **0.466** | 0.237 |
 
 How does the worse-on-legality model score 1.5–2× higher on the composite? Three contributors stack:
 
 1. **Move quality is substantially better when Flash Lite plays a legal move.** Opening ACPL 45 vs GPT-5's 85; middlegame 77 vs 111. Flash Lite plays at strong club-player strength; GPT-5 plays at intermediate club strength. The `exp(-cp_loss/150)` move-quality function is steep at the middle of its range, so a 40-point ACPL gap produces a ~30% per-move quality difference that compounds across 25–40 plies per game.
 
-2. **Flash Lite reaches the endgame consistently; GPT-5 does not.** PlayQuality mean legal plies: Flash Lite 43.1, GPT-5 26.9. The phase-weight function gives ply-30+ plies 3× the weight of opening plies, so a model that survives 43 plies sees substantially more high-weight contribution to its score than one that stops at 27.
+2. **Flash Lite reaches the endgame consistently; GPT-5 does not.** MoveQuality mean legal plies: Flash Lite 43.1, GPT-5 26.9. The phase-weight function gives ply-30+ plies 3× the weight of opening plies, so a model that survives 43 plies sees substantially more high-weight contribution to its score than one that stops at 27.
 
 3. **The 5% forfeit rate is real but not crippling.** 8 of 160 PlayStrength games forfeited — those games contribute 0 to the mean, subtracting ~0.025 from the composite. The remaining 152 games are enough to dominate. Compare Haiku's 95% forfeit rate, which mathematically caps the composite at ~0.05 regardless of how well the surviving games play.
 
@@ -136,7 +136,7 @@ How does the worse-on-legality model score 1.5–2× higher on the composite? Th
 
 A reasonable reading: **Flash Lite's pre-training has more chess-relevant pattern coverage per parameter than its reasoning-tier siblings.** The Gemini family carries strong chess priors (Flash Lite handles unbiased novel positions at 0.90 legality, only 0.05 below the T0 hand-curated bank — see the 5-model × 4-bank table above), and the budget non-reasoning model gets to deploy that pattern-matching directly without paying for reasoning that, for GPT-5, doesn't translate into substantially better play on this task.
 
-**This pattern doesn't generalize.** There's no rule that smaller models win on this benchmark. GPT-5-mini (also budget, also non-reasoning-tier-by-default for many calls) scores 0.279 on PlayStrength and 0.149 on PlayQuality — comparable to its frontier sibling, not exceeding it. DeepSeek-chat (budget non-reasoning) collapses at 0.097. The Flash Lite outlier is specifically about how Google's chess pre-training scales down to the budget cell. It is an *observation about Flash Lite*, not a claim about "budget tier beats frontier."
+**This pattern doesn't generalize.** There's no rule that smaller models win on this benchmark. GPT-5-mini (also budget, also non-reasoning-tier-by-default for many calls) scores 0.279 on PlayStrength and 0.149 on MoveQuality — comparable to its frontier sibling, not exceeding it. DeepSeek-chat (budget non-reasoning) collapses at 0.097. The Flash Lite outlier is specifically about how Google's chess pre-training scales down to the budget cell. It is an *observation about Flash Lite*, not a claim about "budget tier beats frontier."
 
 ### Other matrix-level patterns
 
@@ -175,7 +175,7 @@ Full per-position legality:
 
 T1 numbers are selection-biased — those positions came from games where the model had failed, so they're hard *for that specific model*. T2 and T3 are unbiased random samples and are the cleanest "is this a novelty cliff" test.
 
-### Mean legal plies survived (PlayQuality, max 60)
+### Mean legal plies survived (MoveQuality, max 60)
 
 How far into a game the model gets before forfeit or natural termination:
 
@@ -191,7 +191,7 @@ How far into a game the model gets before forfeit or natural termination:
 | `claude-haiku-4-5-20251001` | 10.0 | 17% |
 | `deepseek-chat` | 7.6 | 13% |
 
-Flash Lite reaches the endgame consistently — its mean is **2× the runner-up**. Note Gemini 2.5 Pro's anomalous low number: it's the top PlayStrength scorer but only 20.5 plies on PlayQuality. PlayQuality uses a harder Stockfish opponent (skill 5 vs 3); Pro survives long enough to score reliably on opening/early-mid plies but doesn't push deep into harder positions. Flash Lite's larger games-played ceiling is why its PlayQuality (0.466) is 2.4× Pro's PlayQuality (0.192).
+Flash Lite reaches the endgame consistently — its mean is **2× the runner-up**. Note Gemini 2.5 Pro's anomalous low number: it's the top PlayStrength scorer but only 20.5 plies on MoveQuality. MoveQuality uses a harder Stockfish opponent (skill 5 vs 3); Pro survives long enough to score reliably on opening/early-mid plies but doesn't push deep into harder positions. Flash Lite's larger games-played ceiling is why its MoveQuality (0.466) is 2.4× Pro's MoveQuality (0.192).
 
 ### ACPL by phase across the matrix
 
@@ -349,6 +349,6 @@ The benchmark measures one cognitive primitive: whether LLMs can pattern-match t
 
 Position novelty is NOT the explanation for in-game degradation in the top-of-matrix cells. Per-position legality tests across four progressively-more-novel banks show that Flash Lite, GPT-5, and Sonnet handle novel positions essentially as well as memorized ones (Opus has a modest cliff; only DeepSeek-chat has a sharp one). What drags matrix PlayStrength down for the top cells is **move quality** (engine-level play scores ~0.95; current top cells play at ACPL ~50–80 = competent club, mid-0.5 quality) and **forfeit rate** (Band-2 and Band-3 models lose games entirely to retry exhaustion). The cliff is in *cumulative coherence across turns*, not in *can the model handle one novel position*.
 
-The strongest model scores 0.485 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. The ranking does not track "reasoning tier" or "frontier vs budget" — Flash Lite (budget non-reasoning) is essentially tied with Gemini 2.5 Pro (frontier reasoning) on PlayStrength, and exceeds it 2.4× on PlayQuality. The benchmark tracks something more specific about coherent state-tracking under stateless inference.
+The strongest model scores 0.485 on a [0, 1] scale where engine-quality self-play is the 1.0 reference. The ranking does not track "reasoning tier" or "frontier vs budget" — Flash Lite (budget non-reasoning) is essentially tied with Gemini 2.5 Pro (frontier reasoning) on PlayStrength, and exceeds it 2.4× on MoveQuality. The benchmark tracks something more specific about coherent state-tracking under stateless inference.
 
 The scoring is designed to be **hill-climbable**. The current matrix top (0.485) leaves real room above 0.9, where engine-quality play would land. That headroom is not noise — it's the gap between today's frontier and a model that can keep its mental picture of an 8×8 board accurate across 40 moves, without external scaffolding.

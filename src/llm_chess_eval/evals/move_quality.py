@@ -1,18 +1,18 @@
-"""PlayQuality (PQ) — supplemental move-strength metric.
+"""MoveQuality (MQ) — supplemental move-strength metric.
 
-PlayQuality is the supplemental companion to **PlayStrength** (the headline
-composite). PlayQuality strips the `retry_cost` factor out of the per-move
+MoveQuality is the supplemental companion to **PlayStrength** (the headline
+composite). MoveQuality strips the `retry_cost` factor out of the per-move
 formula and runs against a harder Stockfish opponent (skill 5) with a tighter
 retry budget. It answers: "once the model has found a legal move, how strong
 is it?" — independent of how many retries that took.
 
-Use PlayQuality when you want to isolate move strength from rule-following
+Use MoveQuality when you want to isolate move strength from rule-following
 discipline. PlayStrength is the right number for headline cross-model
-comparison; PlayQuality is the right number for answering "is this model
+comparison; MoveQuality is the right number for answering "is this model
 weak on rules, or weak on chess?"
 
-    per_move_score = move_quality(cp_loss) × game_phase_weight(ply)
-    move_quality(cp_loss) = exp(-cp_loss / QUALITY_DECAY_CONSTANT)
+    per_move_score = move_quality_from_cp_loss(cp_loss) × game_phase_weight(ply)
+    move_quality_from_cp_loss(cp_loss) = exp(-cp_loss / QUALITY_DECAY_CONSTANT)
     game_phase_weight(ply) = 1 / 1.5 / 2 / 3 by ply bucket
 
     game_score = sum_over_legal_moves(per_move_score) / max_possible_weighted_score
@@ -74,10 +74,10 @@ def _move_quality_from_cp_loss(cp_loss: int) -> float:
     return math.exp(-max(0, cp_loss) / QUALITY_DECAY_CONSTANT)
 
 
-def play_quality(games: list[GameRecord], max_plies: int = 60) -> dict:
+def move_quality(games: list[GameRecord], max_plies: int = 60) -> dict:
     if not games:
         return {
-            "play_quality": 0.0,
+            "move_quality": 0.0,
             "n_games": 0,
             "completion_rate_natural": 0.0,
             "mean_survival": 0.0,
@@ -128,8 +128,8 @@ def play_quality(games: list[GameRecord], max_plies: int = 60) -> dict:
         quality_mean = (
             sum(_move_quality_from_cp_loss(m.cp_loss) for m in legal_moves) / len(legal_moves)
         ) if legal_moves else 0.0
-        # Composite PS: weighted sum / max possible weighted. PS does NOT
-        # apply a retry cost multiplier (that's CR's job) — once a move is
+        # Composite MQ: weighted sum / max possible weighted. MoveQuality does NOT
+        # apply a retry cost multiplier (that's PlayStrength's job) — once a move is
         # found, it's scored on its strength alone.
         weighted_sum = sum(
             _move_quality_from_cp_loss(m.cp_loss) * _game_phase_weight(m.ply)
@@ -143,13 +143,13 @@ def play_quality(games: list[GameRecord], max_plies: int = 60) -> dict:
     n = len(games)
     completion_rate_natural = completions / n
     acpl_overall = sum(all_cp_capped) / len(all_cp_capped) if all_cp_capped else 0.0
-    pq = sum(per_game_scores) / n
+    mq = sum(per_game_scores) / n
 
     def _mean(xs: list[int]) -> float:
         return sum(xs) / len(xs) if xs else 0.0
 
     return {
-        "play_quality": pq,
+        "move_quality": mq,
         "n_games": n,
         "completion_rate_natural": completion_rate_natural,
         "mean_survival": sum(per_game_survival) / n,

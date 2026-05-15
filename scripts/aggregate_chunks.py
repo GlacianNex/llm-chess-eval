@@ -16,7 +16,7 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from llm_chess_eval.evals.play_strength import play_strength, load_games
-from llm_chess_eval.evals.play_quality import play_quality
+from llm_chess_eval.evals.move_quality import move_quality
 
 
 def is_clean_game(g: dict) -> bool:
@@ -84,7 +84,7 @@ def main() -> None:
     print(f"{'model':<32} | {'metric':<12} | {'N clean':>8} | {'N corrupt':>10} | {'score':>6}")
     print("-" * 80)
     for model in args.models:
-        for label, skill, max_plies in [("PlayStrength", 3, 40), ("PlayQuality", 5, 60)]:
+        for label, skill, max_plies in [("PlayStrength", 3, 40), ("MoveQuality", 5, 60)]:
             out_dir, n_clean, n_corrupt = aggregate(model, skill, args.since)
             if not out_dir or n_clean == 0:
                 print(f"{model:<32} | {label:<12} | {'-':>8} | {n_corrupt:>10} | {'-':>6}")
@@ -94,8 +94,8 @@ def main() -> None:
                 r = play_strength(games, max_plies=max_plies)
                 score = r["play_strength"]
             else:
-                r = play_quality(games, max_plies=max_plies)
-                score = r["play_quality"]
+                r = move_quality(games, max_plies=max_plies)
+                score = r["move_quality"]
             print(f"{model:<32} | {label:<12} | {n_clean:>8} | {n_corrupt:>10} | {score:>6.3f}")
 
 
