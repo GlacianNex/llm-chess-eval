@@ -81,7 +81,7 @@ def analyze_run(run_dir: Path) -> dict[str, list[float]]:
             # Final accepted attempt index = retries (0-indexed)
             level = efforts[retries] if retries < len(efforts) else "default"
             cp_loss = m.get("cp_loss", 0) or 0
-            # Cap at 1000 to match chess_reliability scoring (mate-in-N gets
+            # Cap at 1000 to match play_strength scoring (mate-in-N gets
             # huge raw cp_loss values that distort the mean).
             cp_loss = min(max(cp_loss, 0), 1000)
             by_level[level].append(cp_loss)

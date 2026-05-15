@@ -1,66 +1,78 @@
-"""PlayQuality (formerly PlayStrength) — move-strength metric across full games.
+"""PlayStrength (PS) — primary composite metric.
 
-Complement to ChessReliability:
-  - ChessReliability measures rule-following: can the model produce a legal
-    move on first attempt at a low Stockfish skill, with steep per-retry cost.
-  - PlayQuality measures move strength once a legal move is found. Stockfish
-    skill 5 (harder opponent), retry mode with max_retries=3 (no per-retry
-    cost). Captures mid/endgame move quality that ChessReliability's tighter
-    retry budget misses.
+PlayStrength is a single 0–1 score that captures how strongly a model plays
+chess across full games against an amateur-tier Stockfish opponent. It bakes
+three things into one number: move quality, rule-following discipline (cost
+for needing retries), and game-phase progression (late game weighted more).
 
-Metric (per game, then averaged across games):
-    per_move_score = move_quality(cp_loss) × game_phase_weight(ply)
+    per_move_score = move_quality(cp_loss) × retry_cost(retries) × game_phase_weight(ply)
+
     move_quality(cp_loss) = exp(-cp_loss / QUALITY_DECAY_CONSTANT)
-    game_phase_weight(ply) = 1 / 1.5 / 2 / 3 by ply bucket (softened from
-    earlier 1/2/4/8 so the denominator isn't dominated by late plies)
+        exponential decay so the top of the scale isn't squashed.
+        cp_loss=0 → 1.000  (Stockfish's top move)
+        cp_loss=50 → 0.717 (grandmaster-level)
+        cp_loss=150 → 0.368 (competent club)
+        cp_loss=500 → 0.036 (blunder)
+        cp_loss=1000 → 0.001 (mate-level blunder)
 
+    retry_cost(retries) = 0.25 ^ retries_used
+        steep multiplicative penalty — 1 retry costs 75% of move value,
+        2 retries cost 94%. Models that need the retry safety net to find
+        a legal move can't recover the score even when they eventually do.
+
+    game_phase_weight(ply) = 1 / 1.5 / 2 / 3 by ply bucket
+        Endgame counts 3× opening, encoding the memorization-cliff thesis
+        (later plies are progressively more novel from training) without
+        making scores collapse for models that break down in middlegame.
+
+Per-game score:
     game_score = sum_over_legal_moves(per_move_score) / max_possible_weighted_score
 
-PlayQuality does NOT include a retry cost multiplier — that's ChessReliability's
-job. Once a move is found legally, PlayQuality scores its strength independent
-of how many attempts it took. This is the conceptual split between the two
-metrics: Reliability is "can the model play legal chess on first attempt";
-PlayQuality is "given it found a legal move, how good was it."
+    where max_possible_weighted_score = sum(game_phase_weight(p) for p in 1..max_plies).
+    The denominator is constant per max_plies, so an early forfeit loses
+    BOTH the missing per-move scores AND the high-weight plies that would
+    have contributed disproportionately to the denominator. Forfeit at
+    ply 20 of 40 keeps ~30% of the achievable score; forfeit at ply 5
+    keeps ~6%.
 
-The denominator (max_possible_weighted_score = sum of phase weights for plies
-1..max_plies) is constant per max_plies. An early forfeit loses both the
-missing per-move scores AND the high-weight late plies that would have
-contributed disproportionately. This bakes the memorization-cliff thesis
-into the metric: surviving to ply 30 is worth more than playing ply 5 well.
+PlayStrength is the mean of game_score across N games. Bounded [0, 1];
+higher is better.
 
 Default config:
-    - retry mode with max_retries = 3 (no per-retry cost)
-    - QUALITY_DECAY_CONSTANT = 150 (same as ChessReliability)
-    - Phase weights 1/1.5/2/3 at ply boundaries 10/20/30 (same as ChessReliability)
-    - Stockfish skill 5, max_plies 60
+    - retry mode with max_retries = 10 (so games have many chances to complete)
+    - QUALITY_DECAY_CONSTANT = 150 (puts grandmaster-level play at ~0.7 and
+      club-level at ~0.35; leaves real headroom above current matrix top)
+    - Phase weights 1/1.5/2/3 at ply boundaries 10/20/30
+    - Stockfish skill 3, max_moves 40
 
-Reported separately:
-  - completion_rate_natural: fraction of games that ended with a real chess
-    result (1-0/0-1/draw) rather than running out of retries
-  - ACPL by phase (opening / middlegame / endgame)
+The metric is bounded [0, 1]; Stockfish self-play would score 1.0. Existing
+games.jsonl data does not need re-collection when this scoring is updated —
+only re-scoring.
+
+A supplemental metric `PlayQuality` (see play_quality.py) removes the
+retry_cost factor — useful for asking "how good are the moves themselves
+once a legal one is found?" — but PlayStrength is the headline composite.
 """
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
-from ..types import GameRecord
+from ..types import GameRecord, MoveRecord
 
-ACPL_CAP = 1000  # 10 pawns of loss per move caps the penalty
+CP_LOSS_CAP = 1000  # retained for legacy compatibility on capped reporting
 QUALITY_DECAY_CONSTANT = 150.0
-OPENING_END = 15
-MIDDLE_END = 30
-
-
-def _phase_for_move(ply: int) -> str:
-    if ply <= OPENING_END:
-        return "opening"
-    if ply <= MIDDLE_END:
-        return "middlegame"
-    return "endgame"
+RETRY_COST_BASE = 0.25
+DEFAULT_MAX_RETRIES = 10
 
 
 def _game_phase_weight(ply: int) -> float:
-    """Softened phase weight; matches CR. Endgame at 3× opening (was 8×)."""
+    """Softened phase weights — late game still counts more, but not geometrically.
+    Endgame at 3× opening so scores aren't dominated by whether the model
+    reaches ply 30+. Still encodes the memorization-cliff thesis (later
+    plies are progressively more novel from training) but with a less
+    punishing denominator for models that break down in middlegame.
+    """
     if ply < 10:
         return 1.0
     if ply < 20:
@@ -75,100 +87,104 @@ def _max_possible_weighted_score(max_plies: int) -> float:
 
 
 def _move_quality_from_cp_loss(cp_loss: int) -> float:
-    """Exponential decay quality; matches CR."""
+    """Exponential decay quality. cp_loss in centipawns vs Stockfish's best."""
     return math.exp(-max(0, cp_loss) / QUALITY_DECAY_CONSTANT)
 
 
-def compute_play_strength(games: list[GameRecord], max_plies: int = 60) -> dict:
+def _retry_cost_multiplier(retries_used: int, base: float = RETRY_COST_BASE) -> float:
+    """Multiplier applied to a move's score based on how many retries it took."""
+    return base ** max(0, retries_used)
+
+
+def _per_move_score(move: MoveRecord) -> float:
+    """Per-move score: move_quality × retry_cost_multiplier × game_phase_weight.
+
+    Returns 0 for illegal moves (retries exhausted and game forfeited).
+    """
+    if not move.chosen_legal:
+        return 0.0
+    move_quality = _move_quality_from_cp_loss(move.cp_loss)
+    retry_cost = _retry_cost_multiplier(move.retries_used)
+    phase_weight = _game_phase_weight(move.ply)
+    return move_quality * retry_cost * phase_weight
+
+
+def play_strength(
+    games: list[GameRecord],
+    max_plies: int = 40,
+) -> dict:
+    """Compute PlayStrength and component diagnostics across a set of games."""
     if not games:
         return {
             "play_strength": 0.0,
             "n_games": 0,
-            "completion_rate_natural": 0.0,
-            "mean_survival": 0.0,
-            "mean_plies_legal": 0.0,
+            "survival_component_mean": 0.0,
             "quality_component_mean": 0.0,
-            "acpl_overall": 0.0,
-            "acpl_opening": 0.0,
-            "acpl_middlegame": 0.0,
-            "acpl_endgame": 0.0,
-            "wins": 0, "draws": 0, "losses": 0, "forfeits": 0,
+            "retry_cost_mean": 0.0,
+            "mean_plies_legal": 0.0,
+            "mean_retries_per_move": 0.0,
+            "completion_rate": 0.0,
             "per_game_scores": [],
-            "per_game_acpl": [],
         }
 
+    per_game = []
+    survivals = []
+    mean_qualities = []
+    mean_retry_costs = []
+    total_retries = 0
+    total_legal_moves = 0
     completions = 0
-    wins = draws = losses = forfeits = 0
-    all_cp_capped: list[int] = []
-    cp_by_phase: dict[str, list[int]] = {"opening": [], "middlegame": [], "endgame": []}
-    per_game_acpl: list[float] = []
-    per_game_survival: list[float] = []
-    per_game_quality: list[float] = []
-    per_game_scores: list[float] = []
-
     max_weighted_score = _max_possible_weighted_score(max_plies)
+
     for g in games:
-        if g.result == "forfeit_illegal":
-            forfeits += 1
-        else:
-            completions += 1
-            if g.model_won:
-                wins += 1
-            elif g.result == "1/2-1/2":
-                draws += 1
-            else:
-                losses += 1
-
         legal_moves = [m for m in g.moves if m.chosen_legal]
-        per_game = [min(m.cp_loss, ACPL_CAP) for m in legal_moves]
-        all_cp_capped.extend(per_game)
-        game_acpl = sum(per_game) / len(per_game) if per_game else float(ACPL_CAP)
-        per_game_acpl.append(game_acpl)
+        plies_legal = len(legal_moves)
+        survival = min(plies_legal, max_plies) / max_plies
 
-        for m in legal_moves:
-            cp_by_phase[_phase_for_move(m.ply)].append(min(m.cp_loss, ACPL_CAP))
+        if legal_moves:
+            # Diagnostic means (still useful for the per-cell scorecard).
+            mean_quality = sum(_move_quality_from_cp_loss(m.cp_loss) for m in legal_moves) / len(legal_moves)
+            mean_retry_cost = sum(_retry_cost_multiplier(m.retries_used) for m in legal_moves) / len(legal_moves)
+            total_retries += sum(m.retries_used for m in legal_moves)
+            total_legal_moves += len(legal_moves)
+            # Composite per-game score: weighted sum of legal-move scores
+            # divided by the maximum achievable weighted score for the
+            # game's max_plies. Unplayed (post-forfeit) plies contribute 0
+            # to numerator but their phase weight is still in denominator,
+            # so forfeit penalty scales with how late in the game it
+            # happened (later forfeit costs more high-weight plies).
+            weighted_sum = sum(_per_move_score(m) for m in legal_moves)
+            score = weighted_sum / max_weighted_score if max_weighted_score else 0.0
+        else:
+            mean_quality = 0.0
+            mean_retry_cost = 0.0
+            score = 0.0
 
-        survival = min(len(legal_moves), max_plies) / max_plies
-        # Diagnostic mean quality (exp decay), useful for the per-cell scorecard.
-        quality_mean = (
-            sum(_move_quality_from_cp_loss(m.cp_loss) for m in legal_moves) / len(legal_moves)
-        ) if legal_moves else 0.0
-        # Composite PS: weighted sum / max possible weighted. PS does NOT
-        # apply a retry cost multiplier (that's CR's job) — once a move is
-        # found, it's scored on its strength alone.
-        weighted_sum = sum(
-            _move_quality_from_cp_loss(m.cp_loss) * _game_phase_weight(m.ply)
-            for m in legal_moves
-        )
-        game_score = weighted_sum / max_weighted_score if max_weighted_score else 0.0
-        per_game_survival.append(survival)
-        per_game_quality.append(quality_mean)
-        per_game_scores.append(game_score)
+        per_game.append(score)
+        survivals.append(survival)
+        mean_qualities.append(mean_quality)
+        mean_retry_costs.append(mean_retry_cost)
+        if plies_legal >= max_plies or g.result in ("1-0", "0-1", "1/2-1/2"):
+            completions += 1
 
     n = len(games)
-    completion_rate_natural = completions / n
-    acpl_overall = sum(all_cp_capped) / len(all_cp_capped) if all_cp_capped else 0.0
-    ps = sum(per_game_scores) / n
-
-    def _mean(xs: list[int]) -> float:
-        return sum(xs) / len(xs) if xs else 0.0
-
     return {
-        "play_strength": ps,
+        "play_strength": sum(per_game) / n,
         "n_games": n,
-        "completion_rate_natural": completion_rate_natural,
-        "mean_survival": sum(per_game_survival) / n,
-        "mean_plies_legal": sum(s * max_plies for s in per_game_survival) / n,
-        "quality_component_mean": sum(per_game_quality) / n,
-        "acpl_overall": acpl_overall,
-        "acpl_opening": _mean(cp_by_phase["opening"]),
-        "acpl_middlegame": _mean(cp_by_phase["middlegame"]),
-        "acpl_endgame": _mean(cp_by_phase["endgame"]),
-        "wins": wins,
-        "draws": draws,
-        "losses": losses,
-        "forfeits": forfeits,
-        "per_game_scores": per_game_scores,
-        "per_game_acpl": per_game_acpl,
-        "moves_by_phase": {k: len(v) for k, v in cp_by_phase.items()},
+        "survival_component_mean": sum(survivals) / n,
+        "quality_component_mean": sum(mean_qualities) / n,
+        "retry_cost_mean": sum(mean_retry_costs) / n,
+        "mean_plies_legal": sum(s * max_plies for s in survivals) / n,
+        "mean_retries_per_move": (total_retries / total_legal_moves) if total_legal_moves else 0.0,
+        "completion_rate": completions / n,
+        "per_game_scores": per_game,
     }
+
+
+def load_games(jsonl_path: Path) -> list[GameRecord]:
+    out: list[GameRecord] = []
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            out.append(GameRecord.model_validate_json(line))
+    return out

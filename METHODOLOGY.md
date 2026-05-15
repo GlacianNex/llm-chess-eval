@@ -25,11 +25,11 @@ The benchmark runs across any provider (Anthropic, OpenAI, Google, DeepSeek, Ope
 
 Two scores per model, both bounded `[0, 1]`:
 
-### ChessReliability
+### PlayStrength (primary)
 
 The model plays games vs Stockfish at skill 3 — approximately **1500 ELO, an intermediate amateur**. On an illegal proposed move, the model is told "that was illegal" and asked to try again — up to 10 retries per move. If all retries fail, the game forfeits.
 
-The opponent is amateur-tier deliberately. Reliability measures rule-following, not chess strength against engines — a stronger opponent would just force the model into harder positions faster without telling us anything new about whether it can keep its mental picture of the board accurate.
+The opponent is amateur-tier deliberately. PlayStrength measures the model's combined rule-following discipline and move quality across a full game — not chess strength against engines. A stronger opponent would just force the model into harder positions faster without telling us anything new about whether it can keep its mental picture of the board accurate.
 
 Per-move score is a product of three factors:
 
@@ -53,13 +53,15 @@ per_game_score  =  sum(per_move_score for legal moves)  /  max_possible_weighted
 
 The denominator (`max_possible_weighted_score = sum(game_phase_weight(p) for p in 1..max_moves_per_game)`) is constant for a given `max_moves_per_game`. Unplayed plies (after a forfeit) contribute 0 to the numerator but their phase weight is still in the denominator. So an early forfeit loses BOTH the missing per-move scores AND access to the high-weight late plies — forfeit penalty scales with how much of the game was missed.
 
-ChessReliability = mean of per_game_score across N games. Published matrix uses N ≥ 20 games per cell (some cells went to N = 100+); max 40 plies per game.
+PlayStrength = mean of per_game_score across N games. Published matrix uses N ≥ 20 games per cell (some cells went to N = 100+); max 40 plies per game.
 
-### PlayQuality
+### PlayQuality (supplemental)
 
-The model plays games vs Stockfish at skill 5 — approximately **1700 ELO, a intermediate amateur**. This is deliberate: the benchmark is not comparing LLMs to a chess engine. Stockfish at skill 5 plays at roughly the level of a competent club player, the kind of opponent that creates real but tractable positions an LLM with genuine chess understanding should be able to navigate. PlayQuality scores are *not* "performance vs engine" — they're "move quality across full games when the opponent is amateur-tier." Retry mode max 3 retries, no per-retry penalty. PlayQuality measures **how strong the model's moves are once it has found a legal one** — it doesn't penalize retry use.
+PlayQuality is the supplemental companion to PlayStrength. It strips the `retry_cost` factor out of the per-move formula and runs against a harder Stockfish opponent (skill 5, ~1700 ELO) with a tighter retry budget (max 3). PlayQuality scores are *not* "performance vs engine" — they're "move quality across full games when the opponent is amateur-tier and retries are free." PlayQuality measures **how strong the model's moves are once it has found a legal one** — it doesn't penalize retry use.
 
-(For context on the full Stockfish skill range: skill 0 ≈ 1100 ELO beginner; skill 3 ≈ 1500 amateur — what Reliability uses; skill 5 ≈ 1700 intermediate amateur — what PlayQuality uses; skill 15 ≈ 2500 strong engine; skill 20 ≈ 2850 top engine. None of the current benchmark cells play against an engine-strength opponent.)
+Use PlayQuality when you want to isolate move strength from rule-following discipline. PlayStrength is the right number for headline cross-model comparison; PlayQuality is the right number for answering "is this model weak on rules, or weak on chess?"
+
+(For context on the full Stockfish skill range: skill 0 ≈ 1100 ELO beginner; skill 3 ≈ 1500 amateur — what PlayStrength uses; skill 5 ≈ 1700 intermediate amateur — what PlayQuality uses; skill 15 ≈ 2500 strong engine; skill 20 ≈ 2850 top engine. None of the current benchmark cells play against an engine-strength opponent.)
 
 Per-move score:
 
@@ -75,21 +77,21 @@ per_game_score  =  sum(per_move_score for legal moves)  /  max_possible_weighted
 
 PlayQuality = mean across N ≥ 10 games (most cells N = 50+), max 60 plies per game.
 
-The difference from ChessReliability is intentional and conceptual: Reliability = "can the model play legal chess on first attempt"; PlayQuality = "given a legal move was found, how good was it." Both share the exponential quality decay and softened phase weight (1/1.5/2/3), so their numbers are directly comparable at the per-move level.
+The difference from PlayStrength is intentional and conceptual: PlayStrength = "how well does the model play legal chess, with rule-following discipline penalized"; PlayQuality = "given a legal move was found, how good was it." Both share the exponential quality decay and softened phase weight (1/1.5/2/3), so their numbers are directly comparable at the per-move level.
 
 ### Why three multiplicative factors
 
 Both metrics use multiplicative structure so any factor near zero collapses the score. A model that forfeits at move 5 can't rescue the score with great opening play (the high-weight late plies in the denominator dominate). A model that drags out long games of mediocre moves can't rescue the score with completion (move_quality is low). A model that needs many retries to find legal moves can't rescue the score with eventual success (retry_cost is exponentially punitive).
 
-### Reliability is NOT first-attempt-legal — they measure different things
+### PlayStrength is NOT first-attempt-legal — they measure different things
 
-The benchmark reports both **`first_attempt_legal_rate`** (a diagnostic — fraction of plies where the model's very first proposal was a legal SAN) and **`ChessReliability`** (the composite score). It's easy to assume "high first-attempt legality → high Reliability", but the composite has three factors and first-attempt-legality is only one of them. The other two can drag the score substantially even when legality is near-perfect:
+The benchmark reports both **`first_attempt_legal_rate`** (a diagnostic — fraction of plies where the model's very first proposal was a legal SAN) and **`PlayStrength`** (the composite score). It's easy to assume "high first-attempt legality → high PlayStrength", but the composite has three factors and first-attempt-legality is only one of them. The other two can drag the score substantially even when legality is near-perfect:
 
 - **`move_quality(cp_loss)`**: a legal move with cp_loss = 86 has quality = exp(−86/150) = 0.564, not 1.0. Reaching engine-level play (cp_loss ~5) requires move_quality ~0.97. Most LLMs play moves with cp_loss in the 50-200 range — competent club-player territory, scoring 0.27-0.72 per move on quality alone.
 - **`game_phase_weight(ply)`**: ply-30+ moves are weighted 3×, ply-1-9 are weighted 1×. A model that forfeits early or stops at the max-ply cap before reaching late game loses access to the highest-weighted plies in the numerator while they remain in the denominator. The structural ceiling for a model that perfectly plays only to ply 20 (out of max 40) is ~0.30; perfectly to ply 30 is ~0.59; perfectly to ply 40 is 1.0.
 - **A single full forfeit** (game ends at ply 1 because the model can't produce a legal move even after all retries) drops that game's contribution to 0 regardless of how the other games went. At N=20 games per cell, one forfeit subtracts ~0.05 from the mean — but cells with high forfeit rates (Haiku 95%, DeepSeek-chat 80%) have those zeroes dominating the mean.
 
-A concrete example from the published matrix: **GPT-5 has 99.8% first-attempt-legal, 0.00 avg retries, and zero forfeits — but ChessReliability = 0.301.** Decomposing:
+A concrete example from the published matrix: **GPT-5 has 99.8% first-attempt-legal, 0.00 avg retries, and zero forfeits — but PlayStrength = 0.301.** Decomposing:
 
 | Factor | Contribution |
 |---|---|
@@ -98,7 +100,7 @@ A concrete example from the published matrix: **GPT-5 has 99.8% first-attempt-le
 | Games reach mean ply ~26 (vs max 40) | Misses some high-weight late plies; ~0.45 structural ceiling for typical-game-length |
 | Retry cost (0.00 retries/move) | No penalty here |
 
-The 0.301 composite is the product of "perfect legality × mid-range quality × partial late-game coverage." Read the columns together — first-attempt-legal alone is not a stand-in for Reliability. If GPT-5 played at engine quality (cp_loss ~5), the same legality and game-length profile would score ~0.93.
+The 0.301 composite is the product of "perfect legality × mid-range quality × partial late-game coverage." Read the columns together — first-attempt-legal alone is not a stand-in for PlayStrength. If GPT-5 played at engine quality (cp_loss ~5), the same legality and game-length profile would score ~0.93.
 
 ### Reference points
 
@@ -125,7 +127,7 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 
 **Caveats:**
 
-- **Default `--games` is small** (5 for Reliability, 3 for PlayQuality). Enough for qualitative pattern signal but not for tight effect sizes. The published matrix used N ≥ 20 per cell (many cells N = 100+) for stable means. A 0.02 difference between two models at N=5 could be sampling noise; at N=20+ it's more durable.
+- **Default `--games` is small** (5 for PlayStrength, 3 for PlayQuality). Enough for qualitative pattern signal but not for tight effect sizes. The published matrix used N ≥ 20 per cell (many cells N = 100+) for stable means. A 0.02 difference between two models at N=5 could be sampling noise; at N=20+ it's more durable.
 - **Stockfish version matters.** Move-quality scores depend on the engine's evaluation function. Lock the binary version when comparing across runs. This work used Stockfish 18.
 - **Provider tool-calling differences.** Each provider's structured-output format works slightly differently. The adapters normalize these; a regression on a specific provider can show up as a benchmark regression. Always grep the run JSONL for `"did not call submit_move"` before drawing conclusions.
 - **Quota-corrupted games are dropped.** Per-game error filter removes games where any move hit a 429 / quota error mid-game (so the run isn't contaminated by half-played games where a provider's billing failed silently). Drop counts are reported alongside N per cell in the aggregated output.
@@ -133,7 +135,7 @@ ACPL is the standard chess-strength metric: per move, the centipawn difference b
 
 **Reasonable expectations:**
 
-- LLMs on this benchmark span 0.07 to 0.49 on Reliability. The top two are a Google frontier reasoning model and a Google budget non-reasoning model, essentially tied. Reasoning-tier optimization is neither necessary nor sufficient for high scores.
+- LLMs on this benchmark span 0.07 to 0.49 on PlayStrength. The top two are a Google frontier reasoning model and a Google budget non-reasoning model, essentially tied. Reasoning-tier optimization is neither necessary nor sufficient for high scores.
 - The first-attempt-legal rate and forfeit-rate columns are the most diagnostic single numbers — first-legal measures the fraction of plies where the model's very first proposal (zero retries) was legal; forfeit-rate measures the fraction of games that ended because retries couldn't recover a legal move. Both read independently of scoring choices.
 - Opening positions show **0% failure rate** for every model tested. Failures concentrate on positions outside training distribution.
 - Choice of `move_quality` decay constant (τ=150) is not load-bearing: re-scoring at τ ∈ {100, 200, 300} produces identical model rankings with absolute scores shifting ~20%. See [RESULTS.md § τ sensitivity](RESULTS.md#methodology-robustness--τ-sensitivity).
@@ -163,8 +165,8 @@ $env:DEEPSEEK_API_KEY  = "sk-..."
 llm-chess-eval check-env
 
 # Single-model composite metrics
-llm-chess-eval reliability   --model claude-opus-4-7 --games 5
-llm-chess-eval play-strength --model claude-opus-4-7 --games 3
+llm-chess-eval play-strength --model claude-opus-4-7 --games 5
+llm-chess-eval play-quality  --model claude-opus-4-7 --games 3
 
 # Full cross-provider matrix
 llm-chess-eval benchmark --dry-run    # preview cells without invoking models
@@ -189,8 +191,8 @@ src/llm_chess_eval/
   evals/
     legality.py / consistency.py
     games.py                  # game loop (forfeit/substitute/retry) + per-move progress logging
-    chess_reliability.py      # ChessReliability metric — canonical scoring
-    play_strength.py          # PlayQuality metric — canonical scoring
+    play_strength.py          # PlayStrength metric — canonical scoring (primary)
+    play_quality.py           # PlayQuality metric — canonical scoring (supplemental)
   analytics/
     accumulation.py           # per-move error rate, survival curves
     illegal_taxonomy.py       # classifies why each illegal move failed
@@ -219,7 +221,7 @@ For OpenAI-API-compatible endpoints (Together, Groq, Ollama, vLLM, custom server
 What would tighten the findings:
 
 1. **Larger N per cell.** 5/3 games is enough for qualitative signal; 10-30 per cell is needed for tight effect sizes.
-2. **Skill sweep.** Reliability and PlayQuality at multiple Stockfish skills — how does the cascade interact with opponent strength?
+2. **Skill sweep.** PlayStrength and PlayQuality at multiple Stockfish skills — how does the cascade interact with opponent strength?
 3. **Mid-game starting positions.** Does the cascade need game-length state accumulation, or does it appear immediately from a complex mid-game FEN? Separates "drift across turns" from "complex positions are harder regardless."
 4. **Reasoning-trace inspection across retries.** Save every retry's full response (currently only the final). Measures whether the model genuinely updates between retries vs pattern-matching a different SAN.
 5. **Controlled reasoning-effort experiment.** Same positions × varying effort per call × paired cp_loss. Resolves the confound in the current reasoning-effort-vs-quality observation.
@@ -235,7 +237,7 @@ A few provider-specific behaviors to keep in mind when running this benchmark on
 
 **Gemini has a second tool-output failure: `MALFORMED_FUNCTION_CALL`.** When reasoning runs long enough to corrupt the structured output without quite hitting the length cap, Gemini reports this finish_reason instead. The harness's reasoning-effort fallback ladder triggers on both — when an attempt hits either failure mode, the next retry on that move drops effort one notch (`default → medium → low → minimal`). The fallback activates only after the model demonstrates it can't fit at the current effort.
 
-**Gemini Pro Preview has a 250-request-per-day cap** regardless of paid tier. Only GA models (e.g., `gemini-2.5-pro`) have unrestricted per-tier quotas. A Reliability + PlayQuality gauntlet on a reasoning-heavy model with retries can burn 300-400 requests, so the cap is binding. The benchmark uses `gemini-2.5-pro` for the published frontier-Google cell.
+**Gemini Pro Preview has a 250-request-per-day cap** regardless of paid tier. Only GA models (e.g., `gemini-2.5-pro`) have unrestricted per-tier quotas. A PlayStrength + PlayQuality gauntlet on a reasoning-heavy model with retries can burn 300-400 requests, so the cap is binding. The benchmark uses `gemini-2.5-pro` for the published frontier-Google cell.
 
 **Per-call `reasoning_effort_for_this_attempt` is logged** in `progress.jsonl` so you can audit which calls used reduced reasoning vs the model's default.
 

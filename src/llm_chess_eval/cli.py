@@ -104,7 +104,7 @@ def cmd_games(
     )
 
 
-@main.command("reliability")
+@main.command("play-strength")
 @click.option("--games-jsonl", type=click.Path(path_type=Path), multiple=True, required=False,
               help="Path(s) to games.jsonl files. If omitted, runs a fresh gauntlet.")
 @click.option("--model", type=str, default=None,
@@ -114,23 +114,24 @@ def cmd_games(
 @click.option("--sf-depth", type=int, default=12, help="Stockfish search depth.")
 @click.option("--max-plies", type=int, default=40, help="Cap on LLM plies per game.")
 @click.option("--max-retries", type=int, default=10,
-              help="Per-move retry budget. Each retry costs 0.5^n on per-move score. Default 10.")
-def cmd_reliability(games_jsonl: tuple[Path, ...], model: str | None, n_games: int,
-                    skill: int, sf_depth: int, max_plies: int, max_retries: int) -> None:
-    """Compute ChessReliability score: a single 0-1 metric per model.
+              help="Per-move retry budget. Each retry costs 0.25^n on per-move score. Default 10.")
+def cmd_play_strength(games_jsonl: tuple[Path, ...], model: str | None, n_games: int,
+                      skill: int, sf_depth: int, max_plies: int, max_retries: int) -> None:
+    """Compute PlayStrength score: the headline 0-1 composite per model.
 
-    CR = mean over games of (legal_moves / max_plies) × mean(quality × retry_penalty).
-    Retries are allowed but penalized 0.5^n per move; game forfeits if all retries fail.
+    PS = mean over games of (sum over legal moves of
+         move_quality × retry_cost × game_phase_weight) / max_possible_weighted_score.
+    Retries are allowed but cost 0.25^n per move; game forfeits if all retries fail.
     """
-    from .evals.chess_reliability import chess_reliability, load_games
+    from .evals.play_strength import play_strength, load_games
 
     if games_jsonl:
         for path in games_jsonl:
             games = load_games(path)
-            result = chess_reliability(games, max_plies=max_plies)
+            result = play_strength(games, max_plies=max_plies)
             mdl = games[0].model if games else "?"
             click.echo(f"\n{path.parent.name}  [{mdl}]")
-            click.echo(f"  ChessReliability:    {result['chess_reliability']:.3f}")
+            click.echo(f"  PlayStrength:        {result['play_strength']:.3f}")
             click.echo(f"  n_games:             {result['n_games']}")
             click.echo(f"  survival_component:  {result['survival_component_mean']:.3f}  "
                        f"(mean {result['mean_plies_legal']:.1f}/{max_plies} plies)")
@@ -157,13 +158,13 @@ def cmd_reliability(games_jsonl: tuple[Path, ...], model: str | None, n_games: i
         max_retries=max_retries,
         console=Console(),
     )
-    result = chess_reliability(records, max_plies=max_plies)
+    result = play_strength(records, max_plies=max_plies)
     click.echo("")
-    click.echo(f"ChessReliability ({model}, skill {skill}, {n_games} games, max_retries={max_retries}): "
-               f"[bold]{result['chess_reliability']:.3f}[/bold]")
+    click.echo(f"PlayStrength ({model}, skill {skill}, {n_games} games, max_retries={max_retries}): "
+               f"[bold]{result['play_strength']:.3f}[/bold]")
 
 
-@main.command("play-strength")
+@main.command("play-quality")
 @click.option("--games-jsonl", type=click.Path(path_type=Path), multiple=True, required=False,
               help="Path(s) to games.jsonl from retry-mode runs. If omitted, runs fresh.")
 @click.option("--model", type=str, default=None,
@@ -173,24 +174,23 @@ def cmd_reliability(games_jsonl: tuple[Path, ...], model: str | None, n_games: i
 @click.option("--sf-depth", type=int, default=12, help="Stockfish search depth.")
 @click.option("--max-plies", type=int, default=60, help="Cap on LLM moves per game (longer to reach endgame).")
 @click.option("--max-retries", type=int, default=3, help="Retry attempts per move before forfeit.")
-def cmd_play_strength(games_jsonl: tuple[Path, ...], model: str | None, n_games: int,
-                      skill: int, sf_depth: int, max_plies: int, max_retries: int) -> None:
-    """Compute PlayStrength score: move quality across honest full-game playthroughs.
+def cmd_play_quality(games_jsonl: tuple[Path, ...], model: str | None, n_games: int,
+                     skill: int, sf_depth: int, max_plies: int, max_retries: int) -> None:
+    """Compute PlayQuality score: supplemental move-quality metric.
 
-    Complements ChessReliability — PS measures move quality (ACPL), CR measures
-    rule-following. Uses retry mode at fixed Stockfish skill so games progress
-    to a natural conclusion.
+    Strips the retry_cost factor from PlayStrength and runs against a harder
+    Stockfish opponent. Answers: "given a legal move was found, how good was it?"
     """
-    from .evals.chess_reliability import load_games
-    from .evals.play_strength import compute_play_strength
+    from .evals.play_strength import load_games
+    from .evals.play_quality import play_quality
 
     if games_jsonl:
         for path in games_jsonl:
             games = load_games(path)
-            result = compute_play_strength(games, max_plies=max_plies)
+            result = play_quality(games, max_plies=max_plies)
             mdl = games[0].model if games else "?"
             click.echo(f"\n{path.parent.name}  [{mdl}]")
-            click.echo(f"  PlayStrength:           {result['play_strength']:.3f}")
+            click.echo(f"  PlayQuality:            {result['play_quality']:.3f}")
             click.echo(f"  mean survival:          {result['mean_survival']:.3f}  "
                        f"({result['mean_plies_legal']:.1f}/{max_plies} legal moves)")
             click.echo(f"  mean quality:           {result['quality_component_mean']:.3f}")
@@ -221,10 +221,10 @@ def cmd_play_strength(games_jsonl: tuple[Path, ...], model: str | None, n_games:
         max_retries=max_retries,
         console=Console(),
     )
-    result = compute_play_strength(records, max_plies=max_plies)
+    result = play_quality(records, max_plies=max_plies)
     click.echo("")
-    click.echo(f"PlayStrength ({model}, skill {skill}, {n_games} games, retry mode): "
-               f"{result['play_strength']:.3f}")
+    click.echo(f"PlayQuality ({model}, skill {skill}, {n_games} games, retry mode): "
+               f"{result['play_quality']:.3f}")
     click.echo(f"  survival={result['mean_survival']:.3f} ({result['mean_plies_legal']:.1f}/{max_plies} moves), "
                f"quality={result['quality_component_mean']:.3f}, "
                f"ACPL={result['acpl_overall']:.0f} cp "
@@ -237,27 +237,27 @@ def cmd_play_strength(games_jsonl: tuple[Path, ...], model: str | None, n_games:
               help="Which tier(s) of the benchmark matrix to run.")
 @click.option("--provider", type=click.Choice(list(BENCHMARK_MATRIX.keys()) + ["all"]), default="all",
               help="Filter to a single provider, or 'all'.")
-@click.option("--cr-games", type=int, default=5, help="N games per model for ChessReliability.")
-@click.option("--ps-games", type=int, default=3, help="N games per model for PlayStrength.")
-@click.option("--cr-skill", type=int, default=3, help="Stockfish skill for CR (forfeit mode).")
-@click.option("--ps-skill", type=int, default=5, help="Stockfish skill for PS (retry mode).")
-@click.option("--cr-max-plies", type=int, default=40)
-@click.option("--ps-max-plies", type=int, default=60)
-@click.option("--cr-max-retries", type=int, default=10,
-              help="Retry budget for CR. Each retry costs 0.5^n on per-move score.")
-@click.option("--ps-max-retries", type=int, default=3,
-              help="Retry budget for PS. Retries do not penalize per-move quality.")
+@click.option("--ps-games", type=int, default=5, help="N games per model for PlayStrength.")
+@click.option("--pq-games", type=int, default=3, help="N games per model for PlayQuality.")
+@click.option("--ps-skill", type=int, default=3, help="Stockfish skill for PlayStrength.")
+@click.option("--pq-skill", type=int, default=5, help="Stockfish skill for PlayQuality.")
+@click.option("--ps-max-plies", type=int, default=40)
+@click.option("--pq-max-plies", type=int, default=60)
+@click.option("--ps-max-retries", type=int, default=10,
+              help="Retry budget for PlayStrength. Each retry costs 0.25^n on per-move score.")
+@click.option("--pq-max-retries", type=int, default=3,
+              help="Retry budget for PlayQuality. Retries do not penalize per-move quality.")
 @click.option("--dry-run", is_flag=True, help="Print the planned model set and exit.")
-def cmd_benchmark(tier: str, provider: str, cr_games: int, ps_games: int,
-                  cr_skill: int, ps_skill: int, cr_max_plies: int, ps_max_plies: int,
-                  cr_max_retries: int, ps_max_retries: int, dry_run: bool) -> None:
-    """Run CR + PS for every model in the benchmark matrix.
+def cmd_benchmark(tier: str, provider: str, ps_games: int, pq_games: int,
+                  ps_skill: int, pq_skill: int, ps_max_plies: int, pq_max_plies: int,
+                  ps_max_retries: int, pq_max_retries: int, dry_run: bool) -> None:
+    """Run PlayStrength (primary) + PlayQuality (supplemental) for every model in the matrix.
 
     The matrix is (provider × tier): four providers × {frontier, budget}.
     Edit BENCHMARK_MATRIX in config.py to change which models populate each cell.
     """
-    from .evals.chess_reliability import chess_reliability
-    from .evals.play_strength import compute_play_strength
+    from .evals.play_strength import play_strength
+    from .evals.play_quality import play_quality
     from .harness.game_runner import run_games
 
     # Resolve the model set
@@ -274,8 +274,8 @@ def cmd_benchmark(tier: str, provider: str, cr_games: int, ps_games: int,
     for p, t, m in selected:
         console.print(f"  {p:<10} {t:<8} {m}")
     console.print(f"  total: {len(selected)} models")
-    console.print(f"  CR config: {cr_games} games, skill {cr_skill}, max_plies {cr_max_plies}, mode=retry, max_retries {cr_max_retries} (0.5^n per-retry penalty)")
-    console.print(f"  PS config: {ps_games} games, skill {ps_skill}, max_plies {ps_max_plies}, mode=retry, max_retries {ps_max_retries} (no per-retry penalty)")
+    console.print(f"  PlayStrength config: {ps_games} games, skill {ps_skill}, max_plies {ps_max_plies}, mode=retry, max_retries {ps_max_retries} (0.25^n per-retry cost)")
+    console.print(f"  PlayQuality  config: {pq_games} games, skill {pq_skill}, max_plies {pq_max_plies}, mode=retry, max_retries {pq_max_retries} (no per-retry cost)")
 
     if dry_run:
         return
@@ -284,30 +284,30 @@ def cmd_benchmark(tier: str, provider: str, cr_games: int, ps_games: int,
     for p, t, model in selected:
         console.rule(f"{p} / {t} — {model}")
         try:
-            adapter_cr = build_adapter(model=model)
-            _, cr_records = run_games(
-                adapter=adapter_cr, n_games=cr_games, skill=cr_skill,
-                sf_depth=12, max_plies=cr_max_plies,
-                color="alternating", mode="retry", max_retries=cr_max_retries, console=console,
-            )
-            cr = chess_reliability(cr_records, max_plies=cr_max_plies)
-
             adapter_ps = build_adapter(model=model)
             _, ps_records = run_games(
                 adapter=adapter_ps, n_games=ps_games, skill=ps_skill,
                 sf_depth=12, max_plies=ps_max_plies,
                 color="alternating", mode="retry", max_retries=ps_max_retries, console=console,
             )
-            ps = compute_play_strength(ps_records, max_plies=ps_max_plies)
+            ps = play_strength(ps_records, max_plies=ps_max_plies)
+
+            adapter_pq = build_adapter(model=model)
+            _, pq_records = run_games(
+                adapter=adapter_pq, n_games=pq_games, skill=pq_skill,
+                sf_depth=12, max_plies=pq_max_plies,
+                color="alternating", mode="retry", max_retries=pq_max_retries, console=console,
+            )
+            pq = play_quality(pq_records, max_plies=pq_max_plies)
 
             results.append({
                 "provider": p, "tier": t, "model": model,
-                "CR": cr["chess_reliability"],
                 "PS": ps["play_strength"],
-                "ACPL_overall": ps["acpl_overall"],
-                "ACPL_opening": ps["acpl_opening"],
-                "ACPL_middlegame": ps["acpl_middlegame"],
-                "ACPL_endgame": ps["acpl_endgame"],
+                "PQ": pq["play_quality"],
+                "ACPL_overall": pq["acpl_overall"],
+                "ACPL_opening": pq["acpl_opening"],
+                "ACPL_middlegame": pq["acpl_middlegame"],
+                "ACPL_endgame": pq["acpl_endgame"],
             })
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]Failed on {model}: {type(e).__name__}: {e}[/red]")
@@ -317,14 +317,14 @@ def cmd_benchmark(tier: str, provider: str, cr_games: int, ps_games: int,
 
     # Print matrix summary
     console.rule("Benchmark matrix results")
-    console.print(f"{'provider':<10} {'tier':<10} {'model':<55} {'CR':>5} {'PS':>5} {'ACPL_op':>7} {'ACPL_mid':>8} {'ACPL_end':>8}")
+    console.print(f"{'provider':<10} {'tier':<10} {'model':<55} {'PS':>5} {'PQ':>5} {'ACPL_op':>7} {'ACPL_mid':>8} {'ACPL_end':>8}")
     for r in results:
         if "error" in r:
             console.print(f"{r['provider']:<10} {r['tier']:<10} {r['model']:<55} [red]ERR: {r['error'][:40]}[/red]")
         else:
             console.print(
                 f"{r['provider']:<10} {r['tier']:<10} {r['model']:<55} "
-                f"{r['CR']:>5.3f} {r['PS']:>5.3f} {r['ACPL_opening']:>7.0f} "
+                f"{r['PS']:>5.3f} {r['PQ']:>5.3f} {r['ACPL_opening']:>7.0f} "
                 f"{r['ACPL_middlegame']:>8.0f} {r['ACPL_endgame']:>8.0f}"
             )
 

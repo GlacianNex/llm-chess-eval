@@ -2,7 +2,7 @@
 
 A reproducible benchmark that measures whether LLMs can maintain coherent state and apply rules across many reasoning turns, using chess as a substrate. The cognitive failure mode it isolates is **state reconstruction and 2D spatial reasoning on out-of-distribution positions** — a weakness that shows up wherever LLMs operate on structured state, not just chess.
 
-**The strongest models in the cross-family matrix score 0.48 on a [0, 1] ChessReliability scale where Stockfish self-play is the 1.0 reference.** Gemini 2.5 Pro (frontier reasoning) and Flash Lite (budget non-reasoning) are essentially tied at the top — and Flash Lite *exceeds* Pro 2.4× on PlayQuality. Frontier reasoning models from Anthropic, OpenAI, and DeepSeek cluster around 0.28–0.30, with budget cells from Anthropic and DeepSeek collapsing under 0.10 due to high forfeit rates.
+**The strongest models in the cross-family matrix score 0.48 on a [0, 1] PlayStrength scale where Stockfish self-play is the 1.0 reference.** Gemini 2.5 Pro (frontier reasoning) and Flash Lite (budget non-reasoning) are essentially tied at the top — and Flash Lite *exceeds* Pro 2.4× on PlayQuality (the supplemental move-quality metric). Frontier reasoning models from Anthropic, OpenAI, and DeepSeek cluster around 0.28–0.30, with budget cells from Anthropic and DeepSeek collapsing under 0.10 due to high forfeit rates.
 
 📊 **[RESULTS.md](RESULTS.md)** — the matrix, findings, deep dives
 📖 **[METHODOLOGY.md](METHODOLOGY.md)** — scoring formulas, methodology constraints, reproduction recipe
@@ -11,8 +11,8 @@ A reproducible benchmark that measures whether LLMs can maintain coherent state 
 
 Two composite scores per model, both bounded in `[0, 1]`:
 
-- **ChessReliability** — rule-following over full games vs Stockfish skill 3 (~1500 ELO, intermediate amateur), with up to 10 retries per illegal move at steep per-retry cost. Catches models that can't produce legal play on first attempt.
-- **PlayQuality** — move strength once a legal move is found, against Stockfish skill 5 (~1700 ELO, intermediate amateur). Catches models that play legal-but-bad moves.
+- **PlayStrength** (primary) — composite 0–1 score over full games vs Stockfish skill 3 (~1500 ELO, intermediate amateur). Combines move quality (centipawn loss vs Stockfish's best), retry-cost discipline (`0.25^retries`), and a phase weight that counts late-game plies more.
+- **PlayQuality** (supplemental) — move strength once a legal move is found, against Stockfish skill 5 (~1700 ELO, intermediate amateur). Strips the retry-cost factor from PlayStrength. Isolates "how good are the moves themselves" from "how often does the model find a legal move on first try."
 
 Both metrics use amateur-tier Stockfish opponents — this is not a model-vs-engine comparison. The 1.0 reference on the [0, 1] scale is Stockfish self-play as a scoring anchor, not the opponent the benchmark plays against.
 
@@ -42,8 +42,8 @@ $env:DEEPSEEK_API_KEY  = "sk-..."
 llm-chess-eval check-env
 
 # Single-model composite metrics
-llm-chess-eval reliability   --model claude-opus-4-7 --games 5
-llm-chess-eval play-strength --model claude-opus-4-7 --games 3
+llm-chess-eval play-strength --model claude-opus-4-7 --games 5
+llm-chess-eval play-quality  --model claude-opus-4-7 --games 3
 
 # Cross-provider 8-cell matrix (frontier + budget for 4 providers)
 llm-chess-eval benchmark --dry-run    # preview cells without invoking models

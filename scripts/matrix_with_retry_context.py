@@ -27,7 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = PROJECT_ROOT / "runs"
 
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from llm_chess_eval.evals.chess_reliability import chess_reliability, load_games  # noqa: E402
+from llm_chess_eval.evals.play_strength import play_strength, load_games  # noqa: E402
 
 
 def load_games_dict(run_dir: Path) -> list[dict]:
@@ -73,13 +73,13 @@ def score_run(run_dir: Path, max_plies: int, kind: str) -> dict | None:
     raw = load_games_dict(run_dir)  # raw dicts for retry-context
     if not scored:
         return None
-    cr_record = chess_reliability(scored, max_plies=max_plies)
+    ps_record = play_strength(scored, max_plies=max_plies)
     ctx = aggregate_retry_context(raw)
     return {
         "run": run_dir.name,
         "kind": kind,
-        "score": cr_record["chess_reliability"],
-        "max_retries": 10 if kind == "CR" else 3,
+        "score": ps_record["play_strength"],
+        "max_retries": 10 if kind == "PS" else 3,
         **ctx,
     }
 
@@ -99,8 +99,8 @@ def main() -> None:
     print("-" * 134)
     for model in args.models:
         for kind_label, skill, max_plies, kind_key in [
-            ("Reliability", 3, 40, "CR"),
-            ("PlayQuality", 5, 60, "PS"),
+            ("PlayStrength", 3, 40, "PS"),
+            ("PlayQuality", 5, 60, "PQ"),
         ]:
             run = find_latest_run(model, skill)
             if not run:
